@@ -415,8 +415,9 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
     status: "committed",
   }).where(eq(uploadsTable.id, uploadRecord.id));
 
-  // Save profile if requested
-  if (saveProfile) {
+  // Save profile if requested — only if mapping has all required fields populated
+  const mappingIsValid = !!(mapping.vpn && mapping.brand && mapping.sell_price && mapping.soh);
+  if (saveProfile && mappingIsValid) {
     const delimitedFormat = sourceFormat === "xlsx" ? null : (delimiter ?? null);
     await db
       .insert(importProfilesTable)
