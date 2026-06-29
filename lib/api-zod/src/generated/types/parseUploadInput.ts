@@ -7,7 +7,7 @@
  */
 
 export interface ParseUploadInput {
-  distributorId: number;
+  distributorId?: number;
   headerRowIndex?: number;
   delimiter?: string;
 }

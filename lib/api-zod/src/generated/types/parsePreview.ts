@@ -5,6 +5,7 @@
  * Distributor Pricing & Stock Comparison API
  * OpenAPI spec version: 0.1.0
  */
+import type { ColumnMapping } from './columnMapping';
 import type { ImportProfile } from './importProfile';
 import type { ParsePreviewRowsItem } from './parsePreviewRowsItem';
 
@@ -17,5 +18,10 @@ export interface ParsePreview {
   hasProfile: boolean;
   /** @nullable */
   detectedDelimiter?: string | null;
+  /** @nullable */
+  detectedDistributorId?: number | null;
+  /** @nullable */
+  detectedDistributorName?: string | null;
+  detectedMapping?: ColumnMapping;
   profile?: ImportProfile;
 }

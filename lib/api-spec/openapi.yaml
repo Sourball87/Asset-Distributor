@@ -611,7 +611,6 @@ components:
 
     ParseUploadInput:
       type: object
-      required: [distributorId]
       properties:
         distributorId:
           type: integer
@@ -643,6 +642,12 @@ components:
           type: boolean
         detectedDelimiter:
           type: ["string", "null"]
+        detectedDistributorId:
+          type: ["integer", "null"]
+        detectedDistributorName:
+          type: ["string", "null"]
+        detectedMapping:
+          $ref: "#/components/schemas/ColumnMapping"
         profile:
           $ref: "#/components/schemas/ImportProfile"
 

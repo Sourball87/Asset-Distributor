@@ -9,6 +9,116 @@ import { requireAuth } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
 
+// ---------------------------------------------------------------------------
+// Distributor fingerprints for auto-detection
+// ---------------------------------------------------------------------------
+
+interface ColumnMapping {
+  vpn: string;
+  brand: string;
+  description: string;
+  sell_price: string;
+  soh: string;
+  soo: string | null;
+}
+
+interface DistributorFingerprint {
+  namePattern: string;
+  signatures: string[];
+  mapping: ColumnMapping;
+}
+
+const FINGERPRINTS: DistributorFingerprint[] = [
+  {
+    namePattern: "ingram",
+    signatures: ["Vendor Part Number", "Customer Price", "Available Quantity", "Vendor Name"],
+    mapping: {
+      vpn: "Vendor Part Number",
+      brand: "Vendor Name",
+      description: "Ingram Part Description",
+      sell_price: "Customer Price",
+      soh: "Available Quantity",
+      soo: "Backlog Information",
+    },
+  },
+  {
+    namePattern: "leader",
+    signatures: ["MANUFACTURER SKU", "DBP", "AT", "MANUFACTURER"],
+    mapping: {
+      vpn: "MANUFACTURER SKU",
+      brand: "MANUFACTURER",
+      description: "SHORT DESCRIPTION",
+      sell_price: "DBP",
+      soh: "AT",
+      soo: null,
+    },
+  },
+  {
+    namePattern: "synnex",
+    signatures: ["MANUFACTURER_PART_NUMBER", "RESELLER_BUY_EX", "TOTAL_AVAILABILITY", "MANUFACTURER_NAME"],
+    mapping: {
+      vpn: "MANUFACTURER_PART_NUMBER",
+      brand: "MANUFACTURER_NAME",
+      description: "PRODUCT_DESCRIPTION",
+      sell_price: "RESELLER_BUY_EX",
+      soh: "TOTAL_AVAILABILITY",
+      soo: null,
+    },
+  },
+];
+
+async function detectDistributor(columns: string[]): Promise<{
+  distributorId: number | null;
+  distributorName: string | null;
+  mapping: ColumnMapping | null;
+}> {
+  const colsLower = new Set(columns.map((c) => c.toLowerCase()));
+  const allDistributors = await db.select().from(distributorsTable);
+
+  let bestScore = 0;
+  let result = { distributorId: null as number | null, distributorName: null as string | null, mapping: null as ColumnMapping | null };
+
+  // Try hardcoded fingerprints
+  for (const fp of FINGERPRINTS) {
+    const score = fp.signatures.filter((s) => colsLower.has(s.toLowerCase())).length;
+    if (score > bestScore) {
+      const dist = allDistributors.find((d) => d.name.toLowerCase().includes(fp.namePattern));
+      if (dist) {
+        bestScore = score;
+        // Only use fingerprint mapping for columns that actually exist in this file
+        const safeMapping: ColumnMapping = {
+          vpn: columns.find((c) => c === fp.mapping.vpn) ?? fp.mapping.vpn,
+          brand: columns.find((c) => c === fp.mapping.brand) ?? fp.mapping.brand,
+          description: columns.find((c) => c === fp.mapping.description) ?? "",
+          sell_price: columns.find((c) => c === fp.mapping.sell_price) ?? fp.mapping.sell_price,
+          soh: columns.find((c) => c === fp.mapping.soh) ?? fp.mapping.soh,
+          soo: fp.mapping.soo ? (columns.find((c) => c === fp.mapping.soo) ?? null) : null,
+        };
+        result = { distributorId: dist.id, distributorName: dist.name, mapping: safeMapping };
+      }
+    }
+  }
+
+  // If no fingerprint matched well (score < 2), also try saved profiles
+  if (bestScore < 2) {
+    const profiles = await db.select().from(importProfilesTable);
+    for (const profile of profiles) {
+      const profileMapping = profile.mapping as Record<string, string | null>;
+      const profileCols = Object.values(profileMapping).filter(Boolean) as string[];
+      const score = profileCols.filter((c) => colsLower.has(c.toLowerCase())).length;
+      if (score > bestScore) {
+        const dist = allDistributors.find((d) => d.id === profile.distributorId);
+        if (dist) {
+          bestScore = score;
+          result = { distributorId: dist.id, distributorName: dist.name, mapping: profileMapping as unknown as ColumnMapping };
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 const router = Router();
 
 // Resolve uploads dir relative to workspace root
@@ -115,16 +225,10 @@ router.get("/uploads", requireAuth, async (req, res): Promise<void> => {
   res.json(result);
 });
 
-// POST /uploads/parse — parse file, return preview
+// POST /uploads/parse — parse file, return preview + auto-detect distributor
 router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, res): Promise<void> => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
-    return;
-  }
-
-  const distributorId = Number(req.body.distributorId);
-  if (!distributorId) {
-    res.status(400).json({ error: "distributorId is required" });
     return;
   }
 
@@ -146,38 +250,42 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
   }
 
   const rowCountTotal = rows.length;
-
-  // Check if profile exists
-  const [profile] = await db.select().from(importProfilesTable).where(eq(importProfilesTable.distributorId, distributorId));
-
-  // Apply brand filter if profile exists
-  let matchedRows = rows;
-  let rowCountMatched = rowCountTotal;
-
-  if (profile) {
-    const mapping = profile.mapping as Record<string, string | null>;
-    const brandCol = mapping["brand"];
-    if (brandCol) {
-      const brandMap = await buildBrandMap();
-      matchedRows = rows.filter((r) => {
-        const raw = r[brandCol] ?? "";
-        return resolveCanonicalBrand(raw, brandMap) !== null;
-      });
-      rowCountMatched = matchedRows.length;
-    }
-  }
-
-  // Store temp file key for commit
   const tempFileKey = path.basename(filePath);
+
+  // Auto-detect distributor from columns (or use explicit distributorId if provided)
+  const explicitDistributorId = req.body.distributorId ? Number(req.body.distributorId) : null;
+  const detection = await detectDistributor(columns);
+  const resolvedDistributorId = explicitDistributorId ?? detection.distributorId;
+
+  // Check saved profile for the resolved distributor
+  const [profile] = resolvedDistributorId
+    ? await db.select().from(importProfilesTable).where(eq(importProfilesTable.distributorId, resolvedDistributorId))
+    : [];
+
+  // Effective mapping: saved profile > fingerprint detection > null
+  const effectiveMapping = (profile?.mapping ?? detection.mapping) as Record<string, string | null> | null;
+
+  // Apply brand filter for row count estimate
+  let rowCountMatched = rowCountTotal;
+  if (effectiveMapping?.brand) {
+    const brandMap = await buildBrandMap();
+    rowCountMatched = rows.filter((r) => {
+      const raw = r[effectiveMapping.brand as string] ?? "";
+      return resolveCanonicalBrand(raw, brandMap) !== null;
+    }).length;
+  }
 
   res.json({
     tempFileKey,
     columns,
-    rows: matchedRows.slice(0, 100), // preview first 100
+    rows: rows.slice(0, 50),
     rowCountTotal,
-    rowCountMatched: profile ? rowCountMatched : rowCountTotal,
+    rowCountMatched,
     hasProfile: !!profile,
     detectedDelimiter,
+    detectedDistributorId: detection.distributorId,
+    detectedDistributorName: detection.distributorName,
+    detectedMapping: profile ? null : detection.mapping,
     profile: profile
       ? {
           id: profile.id,

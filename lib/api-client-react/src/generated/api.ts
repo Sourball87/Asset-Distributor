@@ -1184,7 +1184,9 @@ export const getParseUploadUrl = () => {
  */
 export const parseUpload = async (parseUploadInput: ParseUploadInput, options?: RequestInit): Promise<ParsePreview> => {
     const formData = new FormData();
-formData.append(`distributorId`, parseUploadInput.distributorId.toString())
+if(parseUploadInput.distributorId !== undefined) {
+ formData.append(`distributorId`, parseUploadInput.distributorId.toString())
+ }
 if(parseUploadInput.headerRowIndex !== undefined) {
  formData.append(`headerRowIndex`, parseUploadInput.headerRowIndex.toString())
  }

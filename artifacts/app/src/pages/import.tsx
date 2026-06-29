@@ -1,18 +1,13 @@
-import { useState, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useState, useRef, useCallback, useId } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useListDistributors,
-  useCommitUpload,
   getListUploadsQueryKey,
+  CommitUploadInputSourceFormat,
   type ParsePreview,
   type ColumnMapping,
-  type ImportProfile,
-  CommitUploadInputSourceFormat,
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -20,81 +15,39 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FileUp, CheckCircle2, ChevronRight } from "lucide-react";
+import { FileUp, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Types
 // ---------------------------------------------------------------------------
 
-function suggestColumn(columns: string[], keywords: string[]): string {
-  const normalizedCols = columns.map((c) => c.toLowerCase().trim());
-  for (const kw of keywords) {
-    const kwLower = kw.toLowerCase();
-    const idx = normalizedCols.findIndex(
-      (c) => c === kwLower || c.includes(kwLower) || kwLower.includes(c)
-    );
-    if (idx !== -1) return columns[idx];
-  }
-  return "";
+type FileStatus = "queued" | "parsing" | "ready" | "importing" | "done" | "error";
+
+interface FileEntry {
+  id: string;
+  file: File;
+  status: FileStatus;
+  error?: string;
+  // parse result
+  tempFileKey?: string;
+  columns?: string[];
+  mapping?: ColumnMapping;
+  detectedDistributorId?: number | null;
+  detectedDistributorName?: string | null;
+  rowCountTotal?: number;
+  rowCountMatched?: number;
+  detectedDelimiter?: string | null;
+  hasProfile?: boolean;
+  profileHeaderRowIndex?: number;
+  // override
+  overrideDistributorId?: number | null;
+  // result
+  committedCount?: number;
 }
 
-function buildDefaultMapping(
-  columns: string[],
-  profile?: ImportProfile | null
-): ColumnMapping {
-  if (profile) return { ...profile.mapping };
-  return {
-    vpn: suggestColumn(columns, [
-      "vendor part number",
-      "manufacturer_part_number",
-      "manufacturer sku",
-      "part number",
-      "part_number",
-      "vpn",
-      "sku",
-    ]),
-    brand: suggestColumn(columns, [
-      "vendor name",
-      "manufacturer_name",
-      "manufacturer",
-      "brand",
-      "vendor",
-    ]),
-    description: suggestColumn(columns, [
-      "ingram part description",
-      "short_description",
-      "short description",
-      "long description",
-      "description",
-      "material long",
-    ]),
-    sell_price: suggestColumn(columns, [
-      "customer price",
-      "reseller_buy_ex",
-      "dbp",
-      "sell price",
-      "buy price",
-      "price",
-    ]),
-    soh: suggestColumn(columns, [
-      "available quantity",
-      "total_availability",
-      "soh",
-      "qty on hand",
-      "stock on hand",
-      "at",
-    ]),
-    soo:
-      suggestColumn(columns, [
-        "backlog information",
-        "backlog",
-        "soo",
-        "on order",
-        "stock on order",
-      ]) || null,
-  };
+function todayIso(): string {
+  return new Date().toISOString().split("T")[0];
 }
 
 function formatDate(iso: string): string {
@@ -102,96 +55,65 @@ function formatDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function todayIso(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
-function fileSourceFormat(
-  filename: string
-): (typeof CommitUploadInputSourceFormat)[keyof typeof CommitUploadInputSourceFormat] {
+function fileSourceFormat(filename: string): (typeof CommitUploadInputSourceFormat)[keyof typeof CommitUploadInputSourceFormat] {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "xlsx" || ext === "xls") return CommitUploadInputSourceFormat.xlsx;
   return CommitUploadInputSourceFormat.txt;
 }
 
-// ---------------------------------------------------------------------------
-// Step indicator
-// ---------------------------------------------------------------------------
-
-const STEPS = ["Upload", "Mapping", "Preview", "Done"];
-
-function StepBar({ current }: { current: number }) {
-  return (
-    <div className="flex items-center gap-1 mb-6">
-      {STEPS.map((label, i) => {
-        const active = i + 1 === current;
-        const done = i + 1 < current;
-        return (
-          <div key={i} className="flex items-center gap-1">
-            <div
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border ${
-                active
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : done
-                  ? "border-border bg-secondary text-secondary-foreground"
-                  : "border-border text-muted-foreground"
-              }`}
-            >
-              <span>{i + 1}</span>
-              <span>{label}</span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
+function delimiterParam(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (raw === "\t") return "tab";
+  if (raw === "|") return "pipe";
+  return raw;
 }
 
 // ---------------------------------------------------------------------------
-// Column selector helper
+// Helpers
 // ---------------------------------------------------------------------------
 
-function ColSelect({
-  label,
-  required,
-  value,
-  columns,
-  onChange,
-}: {
-  label: string;
-  required?: boolean;
-  value: string;
-  columns: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="grid grid-cols-[180px_1fr] items-center gap-3">
-      <Label className="text-xs text-right text-muted-foreground">
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </Label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-7 text-xs rounded-sm font-mono">
-          <SelectValue placeholder="— not mapped —" />
-        </SelectTrigger>
-        <SelectContent>
-          {!required && (
-            <SelectItem value="__none__" className="text-xs font-mono text-muted-foreground">
-              — not mapped —
-            </SelectItem>
-          )}
-          {columns.map((c) => (
-            <SelectItem key={c} value={c} className="text-xs font-mono">
-              {c}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
+async function parseFile(file: File): Promise<ParsePreview> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/uploads/parse", {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error ?? "Parse failed");
+  }
+  return res.json() as Promise<ParsePreview>;
+}
+
+async function commitFile(entry: FileEntry, snapshotDate: string): Promise<{ rowCountMatched: number }> {
+  const distributorId = entry.overrideDistributorId ?? entry.detectedDistributorId;
+  if (!distributorId || !entry.tempFileKey || !entry.mapping) {
+    throw new Error("Missing required fields for commit");
+  }
+  const body = {
+    distributorId,
+    tempFileKey: entry.tempFileKey,
+    mapping: entry.mapping,
+    sourceFormat: fileSourceFormat(entry.file.name),
+    delimiter: delimiterParam(entry.detectedDelimiter),
+    headerRowIndex: entry.profileHeaderRowIndex ?? 0,
+    snapshotDate,
+    saveProfile: !entry.hasProfile,
+  };
+  const res = await fetch("/api/uploads/commit", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error ?? "Commit failed");
+  }
+  const data = await res.json();
+  return { rowCountMatched: data.rowCountMatched };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,543 +121,387 @@ function ColSelect({
 // ---------------------------------------------------------------------------
 
 export default function ImportPage() {
-  const [step, setStep] = useState(1);
-
-  // Step 1 state
-  const [distributorId, setDistributorId] = useState<number | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [snapshotDate] = useState(todayIso());
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // After parse
-  const [preview, setPreview] = useState<ParsePreview | null>(null);
-  const [parseError, setParseError] = useState<string | null>(null);
-
-  // Step 2 state
-  const [mapping, setMapping] = useState<ColumnMapping>({
-    vpn: "",
-    brand: "",
-    description: "",
-    sell_price: "",
-    soh: "",
-    soo: null,
-  });
-  const [snapshotDate, setSnapshotDate] = useState(todayIso());
-  const [saveProfile, setSaveProfile] = useState(false);
-
-  // Step 3 → 4
-  const [commitResult, setCommitResult] = useState<{
-    rowCountMatched: number;
-    distributorName: string;
-    snapshotDate: string;
-  } | null>(null);
-
-  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-
   const { data: distributors } = useListDistributors();
+  const dropZoneId = useId();
 
-  // Parse mutation (custom — generated hook doesn't include file in FormData)
-  const parseMutation = useMutation({
-    mutationFn: async ({ f, distId }: { f: File; distId: number }) => {
-      const fd = new FormData();
-      fd.append("file", f);
-      fd.append("distributorId", String(distId));
-      const res = await fetch("/api/uploads/parse", {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? "Parse failed");
-      }
-      return res.json() as Promise<ParsePreview>;
-    },
-    onSuccess: (data) => {
-      setPreview(data);
-      setParseError(null);
-      const suggested = buildDefaultMapping(data.columns, data.profile);
-      setMapping(suggested);
-      setSaveProfile(!data.hasProfile);
-      setStep(2);
-    },
-    onError: (e: Error) => {
-      setParseError(e.message);
-    },
-  });
+  // --------------------------------------------------------------------------
+  // File state helpers
+  // --------------------------------------------------------------------------
 
-  const commitMutation = useCommitUpload({
-    mutation: {
-      onSuccess: (result) => {
-        queryClient.invalidateQueries({ queryKey: getListUploadsQueryKey() });
-        const dist = distributors?.find((d) => d.id === distributorId);
-        setCommitResult({
-          rowCountMatched: result.rowCountMatched,
-          distributorName: dist?.name ?? String(distributorId),
-          snapshotDate: result.snapshotDate,
-        });
-        setStep(4);
-      },
-    },
-  });
-
-  // -------------------------------------------------------------------------
-  // File handling
-  // -------------------------------------------------------------------------
-
-  function handleFileAccept(f: File) {
-    setFile(f);
-    setParseError(null);
+  function updateFile(id: string, patch: Partial<FileEntry>) {
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   }
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFileAccept(f);
+  function removeFile(id: string) {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
   }
 
-  // -------------------------------------------------------------------------
-  // Step actions
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // Parse a single file immediately after drop
+  // --------------------------------------------------------------------------
 
-  function handleParse() {
-    if (!file || !distributorId) return;
-    parseMutation.mutate({ f: file, distId: distributorId });
-  }
+  const triggerParse = useCallback(async (entry: FileEntry) => {
+    updateFile(entry.id, { status: "parsing" });
+    try {
+      const preview = await parseFile(entry.file);
+      const mapping: ColumnMapping =
+        preview.detectedMapping ??
+        (preview.profile?.mapping as ColumnMapping) ??
+        { vpn: "", brand: "", description: "", sell_price: "", soh: "", soo: null };
 
-  function handleCommit() {
-    if (!preview || !distributorId || !file) return;
-    const det = preview.detectedDelimiter;
-    const delim = det === "\t" ? "tab" : det === "|" ? "pipe" : det ?? undefined;
-    const fmt = fileSourceFormat(file.name);
-    commitMutation.mutate({
-      data: {
-        distributorId,
+      updateFile(entry.id, {
+        status: "ready",
         tempFileKey: preview.tempFileKey,
+        columns: preview.columns,
         mapping,
-        sourceFormat: fmt,
-        delimiter: delim,
-        headerRowIndex: preview.profile?.headerRowIndex ?? 0,
-        snapshotDate,
-        saveProfile,
-      },
-    });
+        detectedDistributorId: preview.detectedDistributorId ?? null,
+        detectedDistributorName: preview.detectedDistributorName ?? null,
+        rowCountTotal: preview.rowCountTotal,
+        rowCountMatched: preview.rowCountMatched,
+        detectedDelimiter: preview.detectedDelimiter ?? null,
+        hasProfile: preview.hasProfile,
+        profileHeaderRowIndex: preview.profile?.headerRowIndex ?? 0,
+      });
+    } catch (e: unknown) {
+      updateFile(entry.id, {
+        status: "error",
+        error: e instanceof Error ? e.message : "Parse failed",
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function acceptFiles(incoming: FileList | File[]) {
+    const arr = Array.from(incoming);
+    const newEntries: FileEntry[] = arr
+      .filter((f) => {
+        const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+        return ["xlsx", "xls", "csv", "txt"].includes(ext);
+      })
+      .map((f) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file: f,
+        status: "queued" as FileStatus,
+      }));
+
+    setFiles((prev) => [...prev, ...newEntries]);
+
+    for (const entry of newEntries) {
+      triggerParse(entry);
+    }
   }
 
-  function handleReset() {
-    setStep(1);
-    setFile(null);
-    setPreview(null);
-    setParseError(null);
-    setCommitResult(null);
-    setMapping({ vpn: "", brand: "", description: "", sell_price: "", soh: "", soo: null });
+  // --------------------------------------------------------------------------
+  // Import a single file
+  // --------------------------------------------------------------------------
+
+  async function importOne(id: string) {
+    const entry = files.find((f) => f.id === id);
+    if (!entry || entry.status !== "ready") return;
+
+    updateFile(id, { status: "importing" });
+    try {
+      const result = await commitFile(entry, snapshotDate);
+      updateFile(id, { status: "done", committedCount: result.rowCountMatched });
+      queryClient.invalidateQueries({ queryKey: getListUploadsQueryKey() });
+    } catch (e: unknown) {
+      updateFile(id, {
+        status: "error",
+        error: e instanceof Error ? e.message : "Import failed",
+      });
+    }
   }
 
-  // -------------------------------------------------------------------------
-  // Mapping helper
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // Import all ready files
+  // --------------------------------------------------------------------------
 
-  function setField(field: keyof ColumnMapping, val: string) {
-    setMapping((m) => ({
-      ...m,
-      [field]: field === "soo" ? (val === "__none__" ? null : val) : val,
-    }));
+  async function importAll() {
+    const ready = files.filter((f) => f.status === "ready");
+    await Promise.all(ready.map((f) => importOne(f.id)));
   }
 
-  const mappingComplete =
-    !!mapping.vpn && !!mapping.brand && !!mapping.sell_price && !!mapping.soh;
+  // --------------------------------------------------------------------------
+  // Counts
+  // --------------------------------------------------------------------------
 
-  // -------------------------------------------------------------------------
-  // Preview rows — extract mapped columns only
-  // -------------------------------------------------------------------------
+  const readyCount = files.filter((f) => f.status === "ready").length;
+  const doneCount = files.filter((f) => f.status === "done").length;
+  const errorCount = files.filter((f) => f.status === "error").length;
+  const parsingCount = files.filter((f) => f.status === "parsing" || f.status === "queued").length;
 
-  const previewRows = (preview?.rows ?? []).slice(0, 50).map((row) => ({
-    vpn: String((row as Record<string, unknown>)[mapping.vpn] ?? ""),
-    brand: String((row as Record<string, unknown>)[mapping.brand] ?? ""),
-    description: String((row as Record<string, unknown>)[mapping.description] ?? ""),
-    sell_price: String((row as Record<string, unknown>)[mapping.sell_price] ?? ""),
-    soh: String(mapping.soh ? (row as Record<string, unknown>)[mapping.soh] ?? "" : ""),
-    soo: mapping.soo ? String((row as Record<string, unknown>)[mapping.soo] ?? "") : "",
-  }));
-
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // Render
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-base font-semibold text-foreground">Import Snapshot</h1>
+        <h1 className="text-base font-semibold text-foreground">Import Snapshots</h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Upload a distributor price file and map columns to commit a new stock snapshot.
+          Drop one or more distributor files. Distributor and column mapping are detected automatically.
         </p>
       </div>
 
-      <StepBar current={step} />
+      {/* Drop zone */}
+      <div
+        id={dropZoneId}
+        className={`border-2 border-dashed rounded-sm p-10 text-center cursor-pointer transition-colors ${
+          dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (e.dataTransfer.files.length) acceptFiles(e.dataTransfer.files);
+        }}
+        onClick={() => fileRef.current?.click()}
+        role="button"
+        aria-label="Drop files here or click to browse"
+      >
+        <FileUp className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">
+          Drop files here or <span className="text-primary underline">browse</span>
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          .xlsx · .csv · .txt — multiple files supported · up to 50 MB each
+        </p>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv,.txt"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) {
+              acceptFiles(e.target.files);
+              e.target.value = "";
+            }
+          }}
+        />
+      </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Step 1: Upload                                                       */}
-      {/* ------------------------------------------------------------------ */}
-      {step === 1 && (
-        <div className="bg-card border border-border rounded-sm p-5 space-y-5 max-w-xl">
-          {/* Distributor */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">
-              Distributor <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={distributorId ? String(distributorId) : ""}
-              onValueChange={(v) => setDistributorId(Number(v))}
-            >
-              <SelectTrigger className="h-8 text-sm rounded-sm">
-                <SelectValue placeholder="Select distributor…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(distributors ?? []).map((d) => (
-                  <SelectItem key={d.id} value={String(d.id)} className="text-sm">
-                    {d.name}
-                    {d.isBaseline && (
-                      <span className="ml-2 text-xs text-muted-foreground">(baseline)</span>
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {/* File queue */}
+      {files.length > 0 && (
+        <div className="border border-border rounded-sm overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted border-b border-border">
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">File</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground w-48">Distributor</th>
+                <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-28">Rows</th>
+                <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-28">Matched</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground w-32">Status</th>
+                <th className="px-3 py-2 w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((entry, i) => {
+                const effectiveDistributorId =
+                  entry.overrideDistributorId !== undefined
+                    ? entry.overrideDistributorId
+                    : entry.detectedDistributorId;
+                const isReady = entry.status === "ready";
+                const isParsing = entry.status === "parsing" || entry.status === "queued";
+                const isDone = entry.status === "done";
+                const isError = entry.status === "error";
+                const isImporting = entry.status === "importing";
 
-          {/* Drop zone */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">
-              File <span className="text-destructive">*</span>
-            </Label>
-            <div
-              className={`border-2 border-dashed rounded-sm p-8 text-center cursor-pointer transition-colors ${
-                dragging
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50"
-              }`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => fileRef.current?.click()}
-            >
-              <FileUp className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-              {file ? (
-                <div>
-                  <p className="text-sm font-medium text-foreground font-mono">{file.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {(file.size / 1024).toFixed(0)} KB — click to change
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    Drop file here or <span className="text-primary underline">browse</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    .xlsx, .csv, .txt supported (up to 50 MB)
-                  </p>
-                </div>
-              )}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls,.csv,.txt"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFileAccept(f);
-              }}
-            />
-          </div>
+                return (
+                  <tr
+                    key={entry.id}
+                    className={`border-b border-border last:border-0 ${
+                      i % 2 === 0 ? "bg-background" : "bg-muted/20"
+                    }`}
+                  >
+                    {/* Filename */}
+                    <td className="px-3 py-2">
+                      <span className="font-mono text-foreground">{entry.file.name}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        ({(entry.file.size / 1024).toFixed(0)} KB)
+                      </span>
+                    </td>
 
-          {parseError && (
-            <Alert variant="destructive" className="rounded-sm py-2 px-3">
-              <AlertDescription className="text-xs">{parseError}</AlertDescription>
-            </Alert>
-          )}
+                    {/* Distributor — auto-detected or override dropdown */}
+                    <td className="px-3 py-2">
+                      {isParsing ? (
+                        <span className="text-muted-foreground italic">detecting…</span>
+                      ) : isReady || isImporting ? (
+                        <Select
+                          value={String(effectiveDistributorId ?? "")}
+                          onValueChange={(v) =>
+                            updateFile(entry.id, { overrideDistributorId: v ? Number(v) : null })
+                          }
+                        >
+                          <SelectTrigger
+                            className={`h-6 text-xs rounded-sm border-0 bg-transparent p-0 focus:ring-0 shadow-none w-full ${
+                              !effectiveDistributorId ? "text-destructive" : ""
+                            }`}
+                          >
+                            <SelectValue
+                              placeholder={
+                                entry.detectedDistributorName
+                                  ? `${entry.detectedDistributorName} (detected)`
+                                  : "— select distributor —"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(distributors ?? []).map((d) => (
+                              <SelectItem key={d.id} value={String(d.id)} className="text-xs">
+                                {d.name}
+                                {d.isBaseline && (
+                                  <span className="ml-1 text-muted-foreground">(baseline)</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : isDone ? (
+                        <span className="text-muted-foreground">
+                          {distributors?.find((d) => d.id === effectiveDistributorId)?.name ??
+                            entry.detectedDistributorName ??
+                            "—"}
+                        </span>
+                      ) : isError ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : null}
+                    </td>
 
-          <Button
-            onClick={handleParse}
-            disabled={!file || !distributorId || parseMutation.isPending}
-            className="h-8 rounded-sm text-xs"
-          >
-            {parseMutation.isPending ? "Parsing…" : "Parse File →"}
-          </Button>
+                    {/* Total rows */}
+                    <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                      {isParsing ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : entry.rowCountTotal != null ? (
+                        entry.rowCountTotal.toLocaleString()
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+
+                    {/* Matched rows */}
+                    <td className="px-3 py-2 text-right font-mono">
+                      {isDone ? (
+                        <span className="text-foreground font-medium">
+                          {entry.committedCount?.toLocaleString() ?? "—"}
+                        </span>
+                      ) : isReady || isImporting ? (
+                        <span className="text-muted-foreground">
+                          {entry.rowCountMatched?.toLocaleString() ?? "—"}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-3 py-2">
+                      {isParsing && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Parsing…
+                        </span>
+                      )}
+                      {isReady && !effectiveDistributorId && (
+                        <span className="flex items-center gap-1 text-amber-600">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          Select disti
+                        </span>
+                      )}
+                      {isReady && !!effectiveDistributorId && (
+                        <span className="text-muted-foreground">Ready</span>
+                      )}
+                      {isImporting && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Importing…
+                        </span>
+                      )}
+                      {isDone && (
+                        <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          {entry.committedCount?.toLocaleString()} committed
+                        </span>
+                      )}
+                      {isError && (
+                        <span className="flex items-center gap-1 text-destructive" title={entry.error}>
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          Error
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Remove */}
+                    <td className="px-2 py-2 text-center">
+                      {!isImporting && (
+                        <button
+                          onClick={() => removeFile(entry.id)}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label="Remove"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Step 2: Mapping                                                      */}
-      {/* ------------------------------------------------------------------ */}
-      {step === 2 && preview && (
-        <div className="bg-card border border-border rounded-sm p-5 space-y-5 max-w-2xl">
-          {preview.hasProfile && (
-            <Alert className="rounded-sm py-2 px-3 border-amber-200 bg-amber-50">
-              <AlertDescription className="text-xs text-amber-800">
-                Mapping loaded from saved profile — review and adjust if needed.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="space-y-1">
-            <h2 className="text-sm font-semibold">Column Mapping</h2>
-            <p className="text-xs text-muted-foreground">
-              {preview.columns.length} columns detected from{" "}
-              <span className="font-mono">{file?.name}</span>
-              {preview.detectedDelimiter &&
-                preview.detectedDelimiter !== "," && (
-                  <span className="ml-1 text-muted-foreground">
-                    (
-                    {preview.detectedDelimiter === "\t"
-                      ? "tab-separated"
-                      : preview.detectedDelimiter === "|"
-                      ? "pipe-separated"
-                      : `delimiter: "${preview.detectedDelimiter}"`}
-                    )
-                  </span>
-                )}
-            </p>
-          </div>
-
-          <div className="space-y-2.5">
-            <ColSelect
-              label="VPN (part number)"
-              required
-              value={mapping.vpn}
-              columns={preview.columns}
-              onChange={(v) => setField("vpn", v)}
-            />
-            <ColSelect
-              label="Brand"
-              required
-              value={mapping.brand}
-              columns={preview.columns}
-              onChange={(v) => setField("brand", v)}
-            />
-            <ColSelect
-              label="Description"
-              value={mapping.description}
-              columns={preview.columns}
-              onChange={(v) => setField("description", v)}
-            />
-            <ColSelect
-              label="Sell Price"
-              required
-              value={mapping.sell_price}
-              columns={preview.columns}
-              onChange={(v) => setField("sell_price", v)}
-            />
-            <ColSelect
-              label="SOH (stock on hand)"
-              required
-              value={mapping.soh}
-              columns={preview.columns}
-              onChange={(v) => setField("soh", v)}
-            />
-            <ColSelect
-              label="SOO (on order, optional)"
-              value={mapping.soo ?? "__none__"}
-              columns={preview.columns}
-              onChange={(v) => setField("soo", v)}
-            />
-          </div>
-
-          <div className="border-t border-border pt-4 space-y-3">
-            <div className="grid grid-cols-[180px_1fr] items-center gap-3">
-              <Label className="text-xs text-right text-muted-foreground">Snapshot date</Label>
-              <Input
-                type="date"
-                value={snapshotDate}
-                onChange={(e) => setSnapshotDate(e.target.value)}
-                className="h-7 text-xs rounded-sm w-40 font-mono"
-              />
-            </div>
-
-            <div className="grid grid-cols-[180px_1fr] items-center gap-3">
-              <div />
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="save-profile"
-                  checked={saveProfile}
-                  onCheckedChange={(v) => setSaveProfile(!!v)}
-                />
-                <label htmlFor="save-profile" className="text-xs text-muted-foreground cursor-pointer">
-                  Save as default mapping for this distributor
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-sm text-xs"
-              onClick={() => setStep(1)}
-            >
-              ← Back
-            </Button>
-            <Button
-              size="sm"
-              className="h-8 rounded-sm text-xs"
-              disabled={!mappingComplete}
-              onClick={() => setStep(3)}
-            >
-              Preview →
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Step 3: Preview + Commit                                             */}
-      {/* ------------------------------------------------------------------ */}
-      {step === 3 && preview && (
-        <div className="space-y-4">
-          <div className="bg-card border border-border rounded-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="space-y-0.5">
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-mono font-medium text-foreground">
-                    {preview.rowCountTotal.toLocaleString()}
-                  </span>{" "}
-                  total rows in file
-                  {preview.hasProfile && (
-                    <>
-                      {" · "}
-                      <span className="font-mono font-medium text-foreground">
-                        {preview.rowCountMatched.toLocaleString()}
-                      </span>{" "}
-                      matched to tracked brands
-                    </>
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Snapshot date:{" "}
-                  <span className="font-mono text-foreground">{formatDate(snapshotDate)}</span>
-                  {" · "}
-                  Distributor:{" "}
-                  <span className="font-mono text-foreground">
-                    {distributors?.find((d) => d.id === distributorId)?.name}
-                  </span>
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 rounded-sm text-xs"
-                  onClick={() => setStep(2)}
-                >
-                  ← Mapping
-                </Button>
-                <Button
-                  size="sm"
-                  className="h-7 rounded-sm text-xs"
-                  disabled={commitMutation.isPending}
-                  onClick={handleCommit}
-                >
-                  {commitMutation.isPending ? "Committing…" : "Commit Snapshot"}
-                </Button>
-              </div>
-            </div>
-
-            {commitMutation.isError && (
-              <Alert variant="destructive" className="rounded-sm py-2 px-3 mb-3">
+      {/* Error details for failed files */}
+      {files.some((f) => f.status === "error") && (
+        <div className="space-y-1.5">
+          {files
+            .filter((f) => f.status === "error" && f.error)
+            .map((f) => (
+              <Alert key={f.id} variant="destructive" className="rounded-sm py-2 px-3">
                 <AlertDescription className="text-xs">
-                  {(commitMutation.error as Error)?.message ?? "Commit failed"}
+                  <span className="font-mono font-medium">{f.file.name}:</span> {f.error}
                 </AlertDescription>
               </Alert>
-            )}
-
-            <p className="text-xs text-muted-foreground mb-2">
-              Showing first {Math.min(50, previewRows.length)} preview rows
-              {!preview.hasProfile && " — brand filtering applied on commit"}
-            </p>
-
-            <div className="overflow-x-auto border border-border rounded-sm">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-muted border-b border-border">
-                    {["VPN", "Brand", "Description", "Sell Price", "SOH", "SOO"].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3 py-1.5 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className={`border-b border-border last:border-0 ${
-                        i % 2 === 0 ? "bg-background" : "bg-muted/30"
-                      }`}
-                    >
-                      <td className="px-3 py-1 font-mono whitespace-nowrap">{row.vpn}</td>
-                      <td className="px-3 py-1 whitespace-nowrap">{row.brand}</td>
-                      <td className="px-3 py-1 max-w-xs truncate" title={row.description}>
-                        {row.description}
-                      </td>
-                      <td className="px-3 py-1 font-mono whitespace-nowrap text-right">
-                        {row.sell_price}
-                      </td>
-                      <td className="px-3 py-1 font-mono text-right">{row.soh}</td>
-                      <td className="px-3 py-1 font-mono text-right text-muted-foreground">
-                        {row.soo || "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+            ))}
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Step 4: Done                                                         */}
-      {/* ------------------------------------------------------------------ */}
-      {step === 4 && commitResult && (
-        <div className="bg-card border border-border rounded-sm p-8 max-w-md text-center space-y-4">
-          <CheckCircle2 className="h-10 w-10 text-green-600 mx-auto" />
-          <div>
-            <p className="text-sm font-semibold text-foreground">Snapshot committed</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              <span className="font-mono font-medium text-foreground">
-                {commitResult.rowCountMatched.toLocaleString()}
-              </span>{" "}
-              rows imported for{" "}
-              <span className="font-medium text-foreground">{commitResult.distributorName}</span>
-              {" — "}
-              <span className="font-mono">{formatDate(commitResult.snapshotDate)}</span>
-            </p>
+      {/* Bottom action bar */}
+      {files.length > 0 && (
+        <div className="flex items-center justify-between border-t border-border pt-4">
+          <div className="text-xs text-muted-foreground space-x-3">
+            <span>Snapshot date: <span className="font-mono text-foreground">{formatDate(snapshotDate)}</span></span>
+            {parsingCount > 0 && <span>{parsingCount} detecting…</span>}
+            {doneCount > 0 && <span className="text-emerald-700">{doneCount} imported</span>}
+            {errorCount > 0 && <span className="text-destructive">{errorCount} failed</span>}
           </div>
-          <div className="flex gap-2 justify-center">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               className="h-8 rounded-sm text-xs"
-              onClick={handleReset}
+              onClick={() => setFiles([])}
             >
-              Import Another
+              Clear All
             </Button>
             <Button
               size="sm"
               className="h-8 rounded-sm text-xs"
-              onClick={() => setLocation("/comparison")}
+              disabled={readyCount === 0 || files.some((f) => f.status === "importing")}
+              onClick={importAll}
             >
-              View Comparison
+              {files.some((f) => f.status === "importing")
+                ? "Importing…"
+                : `Import ${readyCount} file${readyCount !== 1 ? "s" : ""}`}
             </Button>
           </div>
         </div>

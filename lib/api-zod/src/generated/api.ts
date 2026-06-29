@@ -278,7 +278,7 @@ export const ListUploadsResponse = zod.array(ListUploadsResponseItem)
  * @summary Parse an uploaded file — returns preview rows + detected columns
  */
 export const ParseUploadBody = zod.object({
-  "distributorId": zod.number(),
+  "distributorId": zod.number().optional(),
   "headerRowIndex": zod.number().optional(),
   "delimiter": zod.string().optional()
 })
@@ -291,6 +291,16 @@ export const ParseUploadResponse = zod.object({
   "rowCountMatched": zod.number(),
   "hasProfile": zod.boolean(),
   "detectedDelimiter": zod.string().nullish(),
+  "detectedDistributorId": zod.number().nullish(),
+  "detectedDistributorName": zod.string().nullish(),
+  "detectedMapping": zod.object({
+  "vpn": zod.string(),
+  "brand": zod.string(),
+  "description": zod.string(),
+  "sell_price": zod.string(),
+  "soh": zod.string(),
+  "soo": zod.string().nullish()
+}).optional(),
   "profile": zod.object({
   "id": zod.number(),
   "distributorId": zod.number(),

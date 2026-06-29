@@ -139,7 +139,7 @@ export interface Upload {
 }
 
 export interface ParseUploadInput {
-  distributorId: number;
+  distributorId?: number;
   headerRowIndex?: number;
   delimiter?: string;
 }
@@ -155,6 +155,11 @@ export interface ParsePreview {
   hasProfile: boolean;
   /** @nullable */
   detectedDelimiter?: string | null;
+  /** @nullable */
+  detectedDistributorId?: number | null;
+  /** @nullable */
+  detectedDistributorName?: string | null;
+  detectedMapping?: ColumnMapping;
   profile?: ImportProfile;
 }
 
