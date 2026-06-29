@@ -1,0 +1,185 @@
+# Replit Build Prompt — Distributor Pricing & Stock Comparison Tool
+
+Build a web application for product managers at an IT distributor to benchmark our own pricing and stock against competing distributors. Build it **incrementally in the phases below**, and **confirm the database schema with me before building features on top of it.**
+
+---
+
+## Stack (use exactly this)
+
+- **Frontend:** React + Vite, TypeScript
+- **Data grid:** AG Grid Community — the main comparison view must be a dense, sortable, filterable, enterprise-style grid with sticky headers and pinned/frozen identity columns
+- **Backend:** Node + Express, TypeScript
+- **Database:** PostgreSQL with Drizzle ORM (use Drizzle migrations)
+- **File parsing:** SheetJS (`xlsx`) for Excel; a delimited-text parser (e.g. Papa Parse) for `.txt`
+- **Auth:** simple email/password with server-side sessions. All authenticated users share **one dataset** (a team of PMs working off the same data)
+
+Keep the architecture conventional and clean — this project will later be maintained in a different editor, so avoid Replit-specific lock-in where reasonable. In particular, route **all data ingestion through a single `ImportSource` interface** so that file upload is just one implementation and future automated feeds can be added without reworking the pipeline.
+
+---
+
+## Domain glossary (so the data model is correct)
+
+- **VPN** — vendor part number (a.k.a. manufacturer part number). This is the *identity* of a product and the key we match the same product on **across different distributors**. Do **not** match on a distributor's internal SKU.
+- **SOH** — stock on hand (units available now).
+- **SOO** — stock on order ("on order" quantity). **Not every distributor provides this — it is optional/nullable.**
+- **Sell price** — the price we compare on. Not cost, not RRP.
+- **Distributor / "disti"** — a source of a price + stock file. **Exactly one of them is us** (the baseline — "Dicker Data").
+- **Snapshot** — one uploaded file = one point-in-time snapshot for that distributor.
+- **Movement** — change in SOH for a product at a distributor since *that distributor's previous snapshot* (e.g. `+200 since 26.06.2026`).
+
+---
+
+## The core problem to get right
+
+Every distributor sends a file in a **different layout** — different column names, different order, some Excel, some delimited `.txt`. We only care about **8 brands** out of the hundreds in each file. So the heart of this app is four mechanisms:
+
+1. A reusable, per-distributor **column-mapping profile** that maps that distributor's columns onto our canonical fields.
+2. A **brand filter** that keeps only our 8 tracked brands (with alias handling — distributors label brands inconsistently, e.g. `TP-LINK` vs `TP LINK`).
+3. **Matching products across distributors by normalized VPN.**
+4. **Diffing SOH between consecutive snapshots** to compute movement.
+
+Spend your effort here. The dashboards and grid are straightforward once these are solid.
+
+---
+
+## Data model
+
+Express as Drizzle tables. Field — type — notes:
+
+### `distributors`
+- `id` — pk
+- `name` — text, unique
+- `is_baseline` — boolean (exactly one row is `true` → that's us)
+- `staleness_threshold_days` — int, default `1` (files arrive daily; older than this = stale)
+- `created_at` — timestamptz
+
+### `import_profiles` (saved column mapping per distributor — the reusable layout)
+- `id` — pk
+- `distributor_id` — fk → distributors (one active profile per distributor)
+- `source_format` — enum: `xlsx` | `txt`
+- `delimiter` — text, nullable (for txt: `tab` | `comma` | `pipe`)
+- `header_row_index` — int, default `0` (some files have junk rows above the header)
+- `mapping` — jsonb, the column map, e.g.
+  `{ "vpn": "Part No", "brand": "Manufacturer", "description": "Desc", "sell_price": "Price (ex)", "soh": "Available", "soo": "On Order" }`
+  — `soo` value may be `null` when that distributor doesn't supply it
+- `created_at`, `updated_at`
+
+### `uploads` (each ingestion = one snapshot)
+- `id` — pk
+- `distributor_id` — fk
+- `filename` — text
+- `uploaded_at` — timestamptz
+- `snapshot_date` — date (defaults to upload date; allow user to override if the file is "as at" a prior day)
+- `row_count_total` — int (rows in the file)
+- `row_count_matched` — int (rows kept after the 8-brand filter)
+- `uploaded_by` — fk → users
+- `status` — enum: `parsing` | `mapped` | `committed` | `failed`
+
+### `products` (canonical, keyed by normalized VPN)
+- `id` — pk
+- `vpn_normalized` — text, unique — **the cross-distributor match key**
+- `vpn_display` — text (VPN as first seen, for display)
+- `brand` — text (normalized to one of the 8)
+- `description` — text (latest seen)
+- `first_seen_at`, `last_seen_at` — timestamptz
+- *Edge case:* if the same VPN appears under conflicting brands across files, keep the first brand and flag the row rather than creating duplicates.
+
+### `stock_snapshots` (the fact table — one row per product per upload)
+- `id` — pk
+- `upload_id` — fk → uploads
+- `distributor_id` — fk (denormalized for query speed)
+- `product_id` — fk → products
+- `snapshot_date` — date (denormalized from the upload)
+- `sell_price` — numeric(12,2)
+- `soh` — int, nullable
+- `soo` — int, nullable
+- `created_at` — timestamptz
+
+### `users`
+- `id`, `email` (unique), `name`, `password_hash`, `role`, `created_at`
+
+Movement is computed by ordering a product's `stock_snapshots` for a given distributor by `snapshot_date` and comparing latest vs previous SOH. Compute on read for v1; materialize later only if performance needs it.
+
+---
+
+## Build phases
+
+### Phase 1 — Foundations
+DB + schema (above), migrations, email/password auth with sessions, an empty dashboard shell, and a **Distributors** settings page where I can create distributors and mark one as baseline. **Stop here and show me the schema before continuing.**
+
+### Phase 2 — Import pipeline (the heart — build this carefully)
+Upload flow:
+1. Pick a distributor (or create one).
+2. Upload an `.xlsx` or `.txt` file.
+3. Parse it. For `.txt`, **sniff the delimiter** (tab/comma/pipe) and let me override. Detect the header row (let me set `header_row_index` if there's junk above it).
+4. **If a saved `import_profile` exists for this distributor, auto-apply the mapping** and skip straight to preview. Otherwise show a **mapping UI**: list the detected source columns, and for each canonical field (`vpn`, `brand`, `description`, `sell_price`, `soh`, `soo`) let me pick the matching source column from a dropdown. `soo` must be settable to **"not present in this file."** Save the result as the distributor's profile.
+5. Apply the **brand filter** (keep only the 8 tracked brands, via the alias map below).
+6. **Preview**: show the parsed + filtered rows, plus a summary (`X total rows → Y matched on tracked brands`). Let me confirm or cancel.
+7. On confirm, normalize VPNs, upsert into `products`, and write a `stock_snapshots` row per product against a new `upload` (snapshot).
+
+### Phase 3 — Comparison grid (the main screen)
+An AG Grid view, **one row per product (VPN)**, with:
+- **Pinned identity columns** (frozen left): Brand, VPN, Description.
+- A **column group per distributor**: Sell Price, SOH, SOO, Movement.
+- A product may exist at some distributors and not others — show blanks for missing ones.
+- **vs-Dicker columns** (since one disti is baseline): for each competitor, the price delta and % vs our sell price; plus a per-product **"cheapest competitor"** and a boolean **"Dicker is most expensive."**
+- Full sort, column filters, and a global search box over Brand / VPN / Description.
+- Brand and distributor filter controls at the top.
+
+### Phase 4 — Movement tracking
+Compute SOH movement per product per distributor (latest snapshot vs previous). Display in the Movement column as e.g. **`+200 (since 26.06.2026)`** / **`−50 (since 25.06.2026)`**, dated to the *previous* snapshot. New products (no prior snapshot) show **`NEW`**.
+
+### Phase 5 — Dashboard + flags + polish
+- **Dashboard landing page**: one card per distributor showing **last upload date** in `DD.MM.YYYY` and a freshness indicator — green if today, amber if 1–2 days old, red if older than `staleness_threshold_days`. Each card has an **Upload** button.
+- Summary tiles: total products tracked, count where **Dicker is the most expensive**, total net movement since last upload.
+- An editable **Brand Aliases** settings page (see below) so PMs can add new spellings as they encounter them.
+
+---
+
+## Key logic details
+
+**VPN normalization.** Normalize for matching: trim whitespace, uppercase, collapse internal multiple spaces. Keep `vpn_display` as originally seen. Do **not** strip dashes by default (they can be significant in part numbers) — but make the normalization function a single, well-commented utility so the rule is easy to change.
+
+**Brand normalization.** Map each row's raw brand string to one of the 8 canonical brands via an alias table (below); drop rows that don't match any of the 8. Matching is case-insensitive and whitespace-insensitive.
+
+**"Too expensive" flag.** For each competitor, `price_delta = competitor_sell_price − dicker_sell_price`. Where `dicker_sell_price > competitor_sell_price`, we are more expensive → render that cell **red**; where we're cheaper, **green**. This flag and its magnitude are the foundation a future recommendation engine will read from — keep it as clean derived data.
+
+**Movement colour.** Positive SOH movement green, negative red, `NEW` neutral.
+
+---
+
+## UI / design direction
+
+Dense, information-rich, **enterprise — Pronto Xi / ERP feel**, not a consumer SaaS look. Neutral palette (greys/white, restrained accent), compact row height, **monospace for part numbers and all numeric/price/qty columns** so figures align. Sticky headers, frozen identity columns, zebra striping. Prioritise scan-ability and density over whitespace and rounded playful styling. `DD.MM.YYYY` date format throughout.
+
+---
+
+## Explicitly out of scope for now (but leave the seams)
+
+- **Automated data fetching** will be added later as a *second implementation of the `ImportSource` interface* — design the ingestion pipeline so a non-file feed drops in without changes to parsing/normalization/commit logic.
+- **Automated price-action recommendations** will be added later and will consume the existing "too expensive" derived flags and deltas. Don't build it now; just keep that derived data clean and queryable.
+
+---
+
+## The 8 tracked brands + starting aliases
+
+Only compare these. Seed the alias table with this (editable in settings):
+
+| Canonical brand | Aliases to match (case/space-insensitive) |
+|---|---|
+| SAMSUNG | SAMSUNG |
+| DELL | DELL, DELL TECHNOLOGIES, DELL EMC |
+| APC | APC, APC BY SCHNEIDER ELECTRIC, SCHNEIDER ELECTRIC |
+| TP LINK | TP-LINK, TP LINK, TPLINK |
+| NETGEAR | NETGEAR |
+| SEAGATE | SEAGATE |
+| ASUS | ASUS, ASUSTEK |
+| LENOVO | LENOVO |
+
+(Confirm the APC/Schneider grouping with me — depending on how your distributors label Schneider's wider catalogue, you may want APC only.)
+
+---
+
+## Definition of done for v1
+
+I can: create distributors and mark one as baseline; upload a differently-laid-out Excel or txt file per distributor; map its columns once and have that mapping reused on the next upload; see only the 8 brands; view a single grid comparing sell price / SOH / SOO across all distributors matched by VPN; see SOH movement since each distributor's last upload; see at a glance where we're the most expensive; and see on the dashboard when each distributor's file was last uploaded and whether it's stale.

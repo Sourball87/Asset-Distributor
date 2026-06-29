@@ -1,44 +1,100 @@
-# [Project name]
+# DistiBench — Distributor Pricing & Stock Comparison
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A web application for product managers at an IT distributor to benchmark pricing and stock against competing distributors.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080, served at /api)
+- `pnpm --filter @workspace/app run dev` — run the frontend (port 23863, served at /)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `SESSION_SECRET` — session signing secret
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Frontend: React + Vite, Tailwind CSS, shadcn/ui, wouter routing, TanStack Query
+- API: Express 5 with express-session + connect-pg-simple
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
+- File parsing: SheetJS (`xlsx`) + multer (uploads), Papa Parse (Phase 2)
 - API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Auth: email/password with server-side sessions (bcryptjs)
+- Grid: AG Grid Community (Phase 3)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — API contract (source of truth)
+- `lib/db/src/schema/` — Drizzle table definitions (one file per table)
+- `artifacts/api-server/src/routes/` — Express route handlers
+- `artifacts/api-server/src/lib/` — shared server utilities (vpn.ts, brands.ts)
+- `artifacts/api-server/uploads/` — temp file storage for import pipeline
+- `artifacts/app/src/` — React frontend
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- All data ingestion goes through a single `ImportSource` interface (parse → preview → commit) so future automated feeds drop in without reworking the pipeline.
+- VPN normalization: trim + uppercase + collapse whitespace. Dashes preserved. Single function `normalizeVpn()` — easy to change.
+- Brand matching is alias-based via DB table `brands` (editable in UI). Case+whitespace insensitive.
+- Movement is computed on read (v1) by ordering `stock_snapshots` for a given product+distributor by `snapshot_date` and diffing latest vs previous SOH.
+- Baseline distributor (Dicker Data) is flagged via `is_baseline = true`. Exactly one at a time enforced in the POST/PATCH distributor routes.
+- Sessions stored in Postgres (`user_sessions` table, created automatically by connect-pg-simple).
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+### Phase 1 — Done
+- Email/password auth with server-side sessions
+- Dashboard landing with distributor freshness cards
+- Settings: Distributors (create/edit/delete/set-baseline)
+- Settings: Brands (manage 8 canonical brands + aliases)
+
+### Phase 2 — Next
+- Upload flow: file parse → column mapping UI → brand filter → preview → commit
+- Per-distributor import profiles (auto-apply saved mapping on next upload)
+
+### Phase 3 — Planned
+- AG Grid comparison view (one row per VPN, grouped columns per distributor)
+- vs-Dicker price delta columns, cheapest competitor, "Dicker is most expensive" flag
+
+### Phase 4 — Planned
+- SOH movement column: `+200 (since 26.06.2026)` or `NEW`
+
+### Phase 5 — Planned
+- Dashboard tiles + freshness polish
+- Brand aliases settings page polish
+
+## Domain glossary
+
+- **VPN** — vendor part number (cross-distributor match key)
+- **SOH** — stock on hand
+- **SOO** — stock on order (optional/nullable)
+- **Sell price** — the comparison price (not cost, not RRP)
+- **Baseline** — Dicker Data (our own distributor)
+- **Snapshot** — one uploaded file = one point-in-time dataset for a distributor
+
+## Seed / demo data
+
+- Admin user: `admin@dickerdata.com` / `admin`
+- Baseline distributor: Dicker Data (is_baseline = true)
+- 8 tracked brands pre-seeded with aliases: SAMSUNG, DELL, APC, TP LINK, NETGEAR, SEAGATE, ASUS, LENOVO
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Dense enterprise ERP aesthetic (Pronto Xi feel), not consumer SaaS
+- Monospace for all part numbers, prices, quantities
+- Date format: DD.MM.YYYY throughout
+- Zebra striping on tables, compact row heights
+- No emojis in UI
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- After adding new schema files to `lib/db/src/schema/`, run `pnpm run typecheck:libs` before typechecking artifacts — stale lib declarations cause false-positive TS2305 errors.
+- `pnpm --filter @workspace/db run push` must be run after any schema changes before the API server will work correctly.
+- The brand alias matching is case+whitespace insensitive. Canonical names are stored UPPERCASE in the DB.
+- `connect-pg-simple` creates the `user_sessions` table automatically on first startup (`createTableIfMissing: true`).
 
 ## Pointers
 

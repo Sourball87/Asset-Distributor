@@ -1,0 +1,1 @@
+- [DistiBench schema decisions](distibench-schema.md) — VPN normalization, brand alias matching, session storage, and import pipeline design decisions for this project.

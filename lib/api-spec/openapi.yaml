@@ -3,20 +3,32 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Distributor Pricing & Stock Comparison API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: distributors
+    description: Distributor management
+  - name: brands
+    description: Brand alias management
+  - name: uploads
+    description: File import pipeline
+  - name: comparison
+    description: Price/stock comparison grid
+  - name: dashboard
+    description: Dashboard summary data
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +36,734 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # --- Auth ---
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Email/password login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current session
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # --- Distributors ---
+  /distributors:
+    get:
+      operationId: listDistributors
+      tags: [distributors]
+      summary: List all distributors
+      responses:
+        "200":
+          description: List of distributors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Distributor"
+
+    post:
+      operationId: createDistributor
+      tags: [distributors]
+      summary: Create a new distributor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DistributorInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distributor"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /distributors/{id}:
+    patch:
+      operationId: updateDistributor
+      tags: [distributors]
+      summary: Update a distributor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DistributorUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distributor"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: deleteDistributor
+      tags: [distributors]
+      summary: Delete a distributor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # --- Brand Aliases ---
+  /brands:
+    get:
+      operationId: listBrands
+      tags: [brands]
+      summary: List all canonical brands with their aliases
+      responses:
+        "200":
+          description: List of brands
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Brand"
+
+    post:
+      operationId: createBrand
+      tags: [brands]
+      summary: Create a new canonical brand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrandInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Brand"
+
+  /brands/{id}:
+    patch:
+      operationId: updateBrand
+      tags: [brands]
+      summary: Update a brand and its aliases
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrandUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Brand"
+
+    delete:
+      operationId: deleteBrand
+      tags: [brands]
+      summary: Delete a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # --- Import Profiles ---
+  /distributors/{id}/profile:
+    get:
+      operationId: getImportProfile
+      tags: [uploads]
+      summary: Get import profile for a distributor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportProfile"
+        "404":
+          description: No profile yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      operationId: saveImportProfile
+      tags: [uploads]
+      summary: Save/update import profile for a distributor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportProfileInput"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportProfile"
+
+  # --- Uploads ---
+  /uploads:
+    get:
+      operationId: listUploads
+      tags: [uploads]
+      summary: List uploads (snapshots)
+      parameters:
+        - name: distributorId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of uploads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Upload"
+
+  /uploads/parse:
+    post:
+      operationId: parseUpload
+      tags: [uploads]
+      summary: Parse an uploaded file — returns preview rows + detected columns
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ParseUploadInput"
+      responses:
+        "200":
+          description: Parse preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParsePreview"
+
+  /uploads/commit:
+    post:
+      operationId: commitUpload
+      tags: [uploads]
+      summary: Commit a parsed upload as a snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitUploadInput"
+      responses:
+        "201":
+          description: Upload committed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+
+  # --- Comparison Grid ---
+  /comparison:
+    get:
+      operationId: getComparison
+      tags: [comparison]
+      summary: Get comparison grid data — one row per VPN across all distributors
+      parameters:
+        - name: brand
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: distributorId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comparison rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComparisonResult"
+
+  # --- Dashboard ---
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Dashboard summary — distributor freshness cards + summary tiles
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    # --- Auth ---
+    User:
+      type: object
+      required: [id, email, name, role, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        createdAt:
+          type: string
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    # --- Distributors ---
+    Distributor:
+      type: object
+      required: [id, name, isBaseline, stalenessThresholdDays, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        isBaseline:
+          type: boolean
+        stalenessThresholdDays:
+          type: integer
+        createdAt:
+          type: string
+        lastUploadAt:
+          type: ["string", "null"]
+        lastUploadStatus:
+          type: ["string", "null"]
+
+    DistributorInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isBaseline:
+          type: boolean
+        stalenessThresholdDays:
+          type: integer
+
+    DistributorUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isBaseline:
+          type: boolean
+        stalenessThresholdDays:
+          type: integer
+
+    # --- Brands ---
+    Brand:
+      type: object
+      required: [id, canonicalName, aliases]
+      properties:
+        id:
+          type: integer
+        canonicalName:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+
+    BrandInput:
+      type: object
+      required: [canonicalName, aliases]
+      properties:
+        canonicalName:
+          type: string
+          minLength: 1
+        aliases:
+          type: array
+          items:
+            type: string
+
+    BrandUpdate:
+      type: object
+      properties:
+        canonicalName:
+          type: string
+          minLength: 1
+        aliases:
+          type: array
+          items:
+            type: string
+
+    # --- Import Profiles ---
+    ColumnMapping:
+      type: object
+      required: [vpn, brand, description, sell_price, soh]
+      properties:
+        vpn:
+          type: string
+        brand:
+          type: string
+        description:
+          type: string
+        sell_price:
+          type: string
+        soh:
+          type: string
+        soo:
+          type: ["string", "null"]
+
+    ImportProfile:
+      type: object
+      required: [id, distributorId, sourceFormat, headerRowIndex, mapping, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        distributorId:
+          type: integer
+        sourceFormat:
+          type: string
+          enum: [xlsx, txt]
+        delimiter:
+          type: ["string", "null"]
+        headerRowIndex:
+          type: integer
+        mapping:
+          $ref: "#/components/schemas/ColumnMapping"
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ImportProfileInput:
+      type: object
+      required: [sourceFormat, headerRowIndex, mapping]
+      properties:
+        sourceFormat:
+          type: string
+          enum: [xlsx, txt]
+        delimiter:
+          type: ["string", "null"]
+        headerRowIndex:
+          type: integer
+        mapping:
+          $ref: "#/components/schemas/ColumnMapping"
+
+    # --- Uploads ---
+    Upload:
+      type: object
+      required: [id, distributorId, filename, uploadedAt, snapshotDate, rowCountTotal, rowCountMatched, status]
+      properties:
+        id:
+          type: integer
+        distributorId:
+          type: integer
+        distributorName:
+          type: string
+        filename:
+          type: string
+        uploadedAt:
+          type: string
+        snapshotDate:
+          type: string
+        rowCountTotal:
+          type: integer
+        rowCountMatched:
+          type: integer
+        status:
+          type: string
+          enum: [parsing, mapped, committed, failed]
+
+    ParseUploadInput:
+      type: object
+      required: [distributorId]
+      properties:
+        distributorId:
+          type: integer
+        headerRowIndex:
+          type: integer
+        delimiter:
+          type: string
+
+    ParsePreview:
+      type: object
+      required: [columns, rows, rowCountTotal, rowCountMatched, hasProfile, tempFileKey]
+      properties:
+        tempFileKey:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        rowCountTotal:
+          type: integer
+        rowCountMatched:
+          type: integer
+        hasProfile:
+          type: boolean
+        detectedDelimiter:
+          type: ["string", "null"]
+        profile:
+          $ref: "#/components/schemas/ImportProfile"
+
+    CommitUploadInput:
+      type: object
+      required: [distributorId, tempFileKey, mapping, sourceFormat, headerRowIndex]
+      properties:
+        distributorId:
+          type: integer
+        tempFileKey:
+          type: string
+        mapping:
+          $ref: "#/components/schemas/ColumnMapping"
+        sourceFormat:
+          type: string
+          enum: [xlsx, txt]
+        delimiter:
+          type: ["string", "null"]
+        headerRowIndex:
+          type: integer
+        snapshotDate:
+          type: string
+        saveProfile:
+          type: boolean
+
+    # --- Comparison ---
+    DistributorStockEntry:
+      type: object
+      required: [distributorId, distributorName, isBaseline]
+      properties:
+        distributorId:
+          type: integer
+        distributorName:
+          type: string
+        isBaseline:
+          type: boolean
+        sellPrice:
+          type: ["number", "null"]
+        soh:
+          type: ["integer", "null"]
+        soo:
+          type: ["integer", "null"]
+        movement:
+          type: ["integer", "null"]
+        movementSinceDate:
+          type: ["string", "null"]
+        isNew:
+          type: boolean
+        priceDelta:
+          type: ["number", "null"]
+        priceDeltaPct:
+          type: ["number", "null"]
+
+    ComparisonRow:
+      type: object
+      required: [productId, vpnNormalized, vpnDisplay, brand, description, distributors, cheapestCompetitorId, dickerIsMostExpensive]
+      properties:
+        productId:
+          type: integer
+        vpnNormalized:
+          type: string
+        vpnDisplay:
+          type: string
+        brand:
+          type: string
+        description:
+          type: string
+        distributors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DistributorStockEntry"
+        cheapestCompetitorId:
+          type: ["integer", "null"]
+        dickerIsMostExpensive:
+          type: boolean
+
+    ComparisonResult:
+      type: object
+      required: [rows, distributors]
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComparisonRow"
+        distributors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Distributor"
+
+    # --- Dashboard ---
+    DistributorCard:
+      type: object
+      required: [distributorId, name, isBaseline, stalenessThresholdDays, freshness]
+      properties:
+        distributorId:
+          type: integer
+        name:
+          type: string
+        isBaseline:
+          type: boolean
+        stalenessThresholdDays:
+          type: integer
+        lastUploadAt:
+          type: ["string", "null"]
+        lastUploadDate:
+          type: ["string", "null"]
+        freshness:
+          type: string
+          enum: [fresh, stale_warn, stale_critical, no_data]
+
+    DashboardSummary:
+      type: object
+      required: [distributorCards, totalProducts, dickerMostExpensiveCount, totalNetMovement]
+      properties:
+        distributorCards:
+          type: array
+          items:
+            $ref: "#/components/schemas/DistributorCard"
+        totalProducts:
+          type: integer
+        dickerMostExpensiveCount:
+          type: integer
+        totalNetMovement:
+          type: integer
