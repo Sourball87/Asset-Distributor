@@ -152,6 +152,7 @@ function parseDelimited(content: string, delimiter: string, headerRowIndex: numb
       from_line: headerRowIndex + 1,
       skip_empty_lines: true,
       relax_column_count: true,
+      relax_quotes: true,
       trim: true,
     }) as string[][];
 

@@ -26,10 +26,29 @@ export async function buildBrandMap(): Promise<Map<string, string>> {
 /**
  * Resolve a raw brand string to the canonical brand name.
  * Returns null if not in the tracked list.
+ *
+ * Matching order:
+ *   1. Exact alias match (case+whitespace insensitive)
+ *   2. Prefix match — handles distributor sub-category suffixes like
+ *      "Netgear - Commercial" or "ASUS System - Commercial"
  */
 export function resolveCanonicalBrand(
   raw: string,
   brandMap: Map<string, string>,
 ): string | null {
-  return brandMap.get(normalizeBrandKey(raw)) ?? null;
+  const normalized = normalizeBrandKey(raw);
+  const exact = brandMap.get(normalized);
+  if (exact) return exact;
+
+  // Prefix fallback: "NETGEAR - COMMERCIAL" → NETGEAR when "NETGEAR" is a key
+  for (const [key, canonical] of brandMap.entries()) {
+    if (
+      normalized.startsWith(key + " ") ||
+      normalized.startsWith(key + "-") ||
+      normalized.startsWith(key + ",")
+    ) {
+      return canonical;
+    }
+  }
+  return null;
 }
