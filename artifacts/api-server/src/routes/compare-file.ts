@@ -143,7 +143,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   }
 
   // ─── LOOKUP sheet ──────────────────────────────────────────
-  const R = dataRows.length;
+  const R = 50; // fixed input slots — user pastes their own SKUs
   const IN_START    = 12;
   const IN_END      = 11 + R;
   const RESULTS_ROW = IN_END + 2;
@@ -236,11 +236,10 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   pnHdr.fill      = solid(DARK);
   pnHdr.alignment = { horizontal: "left", indent: 1 };
 
-  // Rows 12…IN_END — pre-filled input cells
+  // Rows 12…IN_END — empty input cells (user pastes their own SKUs)
   const thinIN = thin(IN_BORDER);
   for (let i = 0; i < R; i++) {
     const c = ws.getCell(IN_START + i, 1);
-    c.value  = dataRows[i].key;
     c.fill   = solid(INFILL);
     c.font   = fnt();
     c.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
