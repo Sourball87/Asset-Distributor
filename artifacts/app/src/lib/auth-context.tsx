@@ -26,9 +26,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (queryLoading) return;
     if (me) {
       setCurrentUser(me);
+    } else if (!initialCheckDone) {
+      // Initial check settled with no user — clear state so ProtectedRoute redirects
+      setCurrentUser(null);
     }
     setInitialCheckDone(true);
-  }, [me, queryLoading]);
+  }, [me, queryLoading, initialCheckDone]);
 
   return (
     <AuthContext.Provider

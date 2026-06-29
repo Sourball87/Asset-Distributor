@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useId } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import {
   useListDistributors,
   getListUploadsQueryKey,
@@ -7,6 +8,7 @@ import {
   type ParsePreview,
   type ColumnMapping,
 } from "@workspace/api-client-react";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -16,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FileUp, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
+import { FileUp, CheckCircle2, AlertCircle, Loader2, X, LogIn } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,17 +74,26 @@ function delimiterParam(raw: string | null | undefined): string | undefined {
 // Helpers
 // ---------------------------------------------------------------------------
 
+class AuthExpiredError extends Error {
+  constructor() {
+    super("Session expired — please log in again");
+    this.name = "AuthExpiredError";
+  }
+}
+
+async function apiFetch(url: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, { ...init, credentials: "include" });
+  if (res.status === 401) throw new AuthExpiredError();
+  return res;
+}
+
 async function parseFile(file: File): Promise<ParsePreview> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/uploads/parse", {
-    method: "POST",
-    credentials: "include",
-    body: fd,
-  });
+  const res = await apiFetch("/api/uploads/parse", { method: "POST", body: fd });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error ?? "Parse failed");
+    throw new Error((err as { error?: string }).error ?? `Parse error (HTTP ${res.status})`);
   }
   return res.json() as Promise<ParsePreview>;
 }
@@ -102,15 +113,14 @@ async function commitFile(entry: FileEntry, snapshotDate: string): Promise<{ row
     snapshotDate,
     saveProfile: !entry.hasProfile,
   };
-  const res = await fetch("/api/uploads/commit", {
+  const res = await apiFetch("/api/uploads/commit", {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error ?? "Commit failed");
+    throw new Error((err as { error?: string }).error ?? `Commit error (HTTP ${res.status})`);
   }
   const data = await res.json();
   return { rowCountMatched: data.rowCountMatched };
@@ -124,10 +134,22 @@ export default function ImportPage() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const [snapshotDate] = useState(todayIso());
+  const [sessionExpired, setSessionExpired] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  const { setUser } = useAuth();
+  const [, setLocation] = useLocation();
   const { data: distributors } = useListDistributors();
   const dropZoneId = useId();
+
+  function handleAuthExpired() {
+    setSessionExpired(true);
+  }
+
+  function handleReLogin() {
+    setUser(null);
+    setLocation("/login");
+  }
 
   // --------------------------------------------------------------------------
   // File state helpers
@@ -145,7 +167,7 @@ export default function ImportPage() {
   // Parse a single file immediately after drop
   // --------------------------------------------------------------------------
 
-  const triggerParse = useCallback(async (entry: FileEntry) => {
+  const triggerParse = useCallback(async (entry: FileEntry, onAuthExpired: () => void) => {
     updateFile(entry.id, { status: "parsing" });
     try {
       const preview = await parseFile(entry.file);
@@ -168,10 +190,15 @@ export default function ImportPage() {
         profileHeaderRowIndex: preview.profile?.headerRowIndex ?? 0,
       });
     } catch (e: unknown) {
-      updateFile(entry.id, {
-        status: "error",
-        error: e instanceof Error ? e.message : "Parse failed",
-      });
+      if (e instanceof AuthExpiredError) {
+        onAuthExpired();
+        updateFile(entry.id, { status: "error", error: "Session expired" });
+      } else {
+        updateFile(entry.id, {
+          status: "error",
+          error: e instanceof Error ? e.message : "Parse failed",
+        });
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -192,7 +219,7 @@ export default function ImportPage() {
     setFiles((prev) => [...prev, ...newEntries]);
 
     for (const entry of newEntries) {
-      triggerParse(entry);
+      triggerParse(entry, handleAuthExpired);
     }
   }
 
@@ -210,10 +237,15 @@ export default function ImportPage() {
       updateFile(id, { status: "done", committedCount: result.rowCountMatched });
       queryClient.invalidateQueries({ queryKey: getListUploadsQueryKey() });
     } catch (e: unknown) {
-      updateFile(id, {
-        status: "error",
-        error: e instanceof Error ? e.message : "Import failed",
-      });
+      if (e instanceof AuthExpiredError) {
+        handleAuthExpired();
+        updateFile(id, { status: "error", error: "Session expired" });
+      } else {
+        updateFile(id, {
+          status: "error",
+          error: e instanceof Error ? e.message : "Import failed",
+        });
+      }
     }
   }
 
@@ -247,6 +279,24 @@ export default function ImportPage() {
           Drop one or more distributor files. Distributor and column mapping are detected automatically.
         </p>
       </div>
+
+      {/* Session expired banner */}
+      {sessionExpired && (
+        <Alert variant="destructive" className="rounded-sm py-2.5 px-4 flex items-center justify-between">
+          <AlertDescription className="text-xs">
+            Your session has expired. Please log in again to continue importing.
+          </AlertDescription>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 rounded-sm text-xs ml-4 shrink-0 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            onClick={handleReLogin}
+          >
+            <LogIn className="h-3.5 w-3.5 mr-1" />
+            Log in again
+          </Button>
+        </Alert>
+      )}
 
       {/* Drop zone */}
       <div
