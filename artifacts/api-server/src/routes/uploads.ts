@@ -30,6 +30,18 @@ interface DistributorFingerprint {
 
 const FINGERPRINTS: DistributorFingerprint[] = [
   {
+    namePattern: "dicker",
+    signatures: ["StockCode", "VendorStockCode", "DealerEx", "StockAvailable"],
+    mapping: {
+      vpn: "VendorStockCode",
+      brand: "Vendor",
+      description: "StockDescription",
+      sell_price: "DealerEx",
+      soh: "StockAvailable",
+      soo: null,
+    },
+  },
+  {
     namePattern: "ingram",
     signatures: ["Vendor Part Number", "Customer Price", "Available Quantity", "Vendor Name"],
     mapping: {
