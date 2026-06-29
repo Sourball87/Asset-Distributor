@@ -5,6 +5,7 @@ import distributorsRouter from "./distributors";
 import brandsRouter from "./brands";
 import dashboardRouter from "./dashboard";
 import comparisonRouter from "./comparison";
+import compareFileRouter from "./compare-file";
 import uploadsRouter from "./uploads";
 
 const router: IRouter = Router();
@@ -15,6 +16,7 @@ router.use(distributorsRouter);
 router.use(brandsRouter);
 router.use(dashboardRouter);
 router.use(comparisonRouter);
+router.use(compareFileRouter);
 router.use(uploadsRouter);
 
 export default router;

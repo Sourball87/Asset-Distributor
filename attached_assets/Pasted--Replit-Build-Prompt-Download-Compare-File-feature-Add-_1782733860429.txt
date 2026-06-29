@@ -1,0 +1,116 @@
+# Replit Build Prompt — "Download Compare File" feature
+
+Add a feature to the existing distributor pricing app. The app already ingests four distributor feeds (Dicker plus competitors Ingram, Synnex, Leader) and stores them in Postgres. I want a **Download Compare File** button that lets a product manager filter by brand and download a self-contained Excel workbook — pre-populated from the database — that is identical to the lookup tool described below. Because the data is baked in at export time, the file needs **no Power Query and no external connections**; it just works on open.
+
+Use the app's existing stack (Node + Express + TypeScript backend, React frontend). Generate the workbook server-side with **ExcelJS** (`npm i exceljs`). Stream it as a download.
+
+---
+
+## 1. UI (React)
+
+On the dashboard, add a **Download Compare File** control:
+- A brand filter: a multi-select of the eight tracked brands — SAMSUNG, DELL, APC, TP-LINK, NETGEAR, SEAGATE, ASUS, LENOVO — plus an "All brands" option.
+- A **Download** button that calls `GET /api/compare-file?brands=SAMSUNG,APC` and triggers a file download (`Compare_<brands>_<yyyymmdd>.xlsx`). Use a blob download (`window.URL.createObjectURL`) from the response.
+- Disable the button while generating; show a small spinner.
+
+---
+
+## 2. Backend endpoint
+
+`GET /api/compare-file?brands=...`
+
+**a. Pull the data.** For the selected brand(s), build one row per product (keyed by normalized vendor part number) with Dicker plus each competitor's latest figures:
+
+- Match products **across distributors on the normalized vendor part number** — uppercase and strip all whitespace (`key = vpn.toUpperCase().replace(/\s+/g,'')`). This is the same join the app already uses.
+- **Exclude bundles** (Dicker rows where `Type = 'BundledItem'`).
+- Dicker price = **DealerEx** (the sell price). Dicker SOH = `StockAvailable`, but treat the `999999999` sentinel as null (not-stocked / build-to-order).
+- Competitor mappings already in the app: Ingram → Customer Price / Available Quantity / Backlog (on-order); Synnex → Reseller Buy Ex / Total Availability (no on-order); Leader → DBP / summed state-warehouse stock (no on-order).
+- Where a distributor doesn't carry a part, leave its price/soh null.
+
+Produce an array of objects with exactly these fields, in this order:
+`key, brand, desc, dicker_soh, dicker_price, ingram_soh, ingram_price, ingram_oo, synnex_soh, synnex_price, leader_soh, leader_price`
+`desc` and `brand` should be the Dicker values when present, else the first competitor that has them. Sort by `brand`, then by `dicker_soh` descending (nulls last).
+
+**b. Pull freshness dates.** For each of the four distributors, get the **most recent upload date** recorded in the app (the `uploads`/snapshot table). Return them as four `Date`s: `dicker, ingram, synnex, leader`.
+
+**c. Generate the workbook** (below) and stream it:
+```
+res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+await workbook.xlsx.write(res); res.end();
+```
+
+---
+
+## 3. The workbook (ExcelJS) — reproduce this exactly
+
+Two sheets. Font is **Arial** throughout. Palette (hex): `DARK=1F2A44`, `TEAL=0E7C7B`, `GREY=6B7280`, `RED=C0392B`, `GREEN=1E8449`, `AMBER=B45309`, `INFILL=FFF7D6`.
+
+### Sheet `DATA` (hidden — `state: 'veryHidden'`)
+- Row 1 headers, in order: `key, brand, desc, dicker_soh, dicker_price, ingram_soh, ingram_price, ingram_oo, synnex_soh, synnex_price, leader_soh, leader_price` (columns A–L).
+- Rows 2…N: the data array from step 2a. Write numbers as numbers, nulls as empty cells (do **not** write 0 for "not carried" — leave blank).
+- This is the only part that changes per export.
+
+### Sheet `LOOKUP` (the visible tool — layout is identical every time)
+Column widths A–E: `34, 60, 9, 12, 10`. Hide gridlines. Freeze panes at `A12`.
+
+**Title** — `A1:E1` merged: "DICKER DATA — PRICE & STOCK LOOKUP", white bold 14, fill DARK, row height 30.
+
+**Freshness panel:**
+- `A3:E3` merged: "PRICE FILE FRESHNESS — how current each distributor's feed is (upload / refresh when a feed goes stale)", bold 10, DARK.
+- Row 4 headers (A–D): "Distributor", "Price file date", "Days old", "Status" — white bold 9 on GREY fill.
+- Rows 5–8, one per distributor (Dicker, Ingram, Synnex, Leader):
+  - A = distributor name (bold 10, DARK).
+  - B = the upload date from step 2b, number format `dd/mm/yyyy`.
+  - C = formula `=TODAY()-B{row}`, number format `0`, centered.
+  - D = formula `=IF(C{row}<=1,"current",IF(C{row}<=3,"ageing — consider refresh","STALE — upload a new file"))`, bold 10.
+- Conditional formatting on `D5:D8` (use `worksheet.addConditionalFormatting`, type `expression`):
+  - red bold font where `=$C5>3`
+  - amber bold where `=AND($C5>1,$C5<=3)`
+  - green bold where `=$C5<=1`
+
+**Instruction** — `A10:E10` merged: "Paste vendor part numbers in the yellow cells (one per row). Results render below automatically.", italic 10, GREY.
+
+**Input list:**
+- `A11` = "PART NUMBER", white bold 10 on DARK, left indent.
+- Input cells `A12:A{11+R}` where **R = number of products in the selected brand(s)** (so the file opens fully rendered). Style each input cell with INFILL fill and a thin border `D9C97A`.
+- **Pre-fill** `A12…` with the part numbers (`key` values, or original VendorStockCode) of the selected brand(s), in the same sorted order as DATA. The PM can overwrite/add.
+- Performance note: if R is very large (e.g. Lenovo, ~2,000+), the formula approach below still works but the file gets heavy; for those, render the result rows as static values instead of formulas (same look). For typical brands keep the formulas.
+
+**Results area** (let `OUT0 = 13 + R` rounded to leave a one-row gap, e.g. start results two rows below the last input row; define `OUT0` as the first output row):
+- `A{OUT0-2}:E{OUT0-2}` merged: "RESULTS", bold 11 DARK.
+- Row `OUT0-1` column headers (A–E): "Part Number", "Description / Distributor", "SOH", "Price (ex)", "On Order" — white bold 10 on DARK; A,B left-indented; C,D,E centered.
+- Then one **4-row block per input slot** `k` (0-based), starting at `base = OUT0 + 4*k`. Let `inref = INDEX($A$12:$A${11+R},k+1)`, `nk = UPPER(SUBSTITUTE(TRIM(inref)," ",""))`, `m = MATCH(nk,DATA!$A:$A,0)`.
+
+  **Row `base` (Dicker):**
+  - A = `=IF(inref="","",inref)` — bold DARK.
+  - B = `=IF(inref="","",IFERROR(INDEX(DATA!$C:$C,m),"— part not found —"))`.
+  - C = `=IF(inref="","",IF(ISNUMBER($D{base}),INDEX(DATA!$D:$D,m),""))` — bold DARK, centered.
+  - D = `=IF(inref="","",IFERROR(IF(INDEX(DATA!$E:$E,m)=0,"not stocked",INDEX(DATA!$E:$E,m)),"not stocked"))` — bold DARK, centered, number format `$#,##0.00`.
+  - Top border (thin, `C7CCD4`) across A–E to separate blocks.
+
+  **Row `base+1` (Ingram):**
+  - B = `=IF(inref="","","▸ Ingram")` — TEAL, **right-aligned**.
+  - C = `=IF(inref="","",IF(ISNUMBER($D{base+1}),INDEX(DATA!$F:$F,m),""))` — centered.
+  - D = `=IF(inref="","",IFERROR(IF(INDEX(DATA!$G:$G,m)=0,"not listed",INDEX(DATA!$G:$G,m)),"not listed"))` — centered, `$#,##0.00`.
+  - E = `=IF(inref="","",IF(ISNUMBER($D{base+1}),INDEX(DATA!$H:$H,m),""))` — centered (Ingram on-order).
+
+  **Row `base+2` (Synnex):** same as Ingram but B label "▸ Synnex", C uses `DATA!$I:$I`, D uses `DATA!$J:$J`, no E.
+
+  **Row `base+3` (Leader):** B label "▸ Leader", C uses `DATA!$K:$K`, D uses `DATA!$L:$L`, no E.
+
+- **Conditional formatting** on the price column over the whole output range `D{OUT0}:D{OUT0+4R-1}` (type `expression`), comparing each competitor price to its block's Dicker price:
+  - red bold where `=AND(MOD(ROW()-{OUT0},4)<>0,ISNUMBER(D{OUT0}),ISNUMBER(INDEX($D:$D,{OUT0}+4*INT((ROW()-{OUT0})/4))),D{OUT0}<INDEX($D:$D,{OUT0}+4*INT((ROW()-{OUT0})/4)))`
+  - green bold where the final comparison is `>` instead of `<`
+  - (Anchor the rule formula on the top-left output cell so ExcelJS applies it relatively down the range.)
+
+---
+
+## 4. Notes / acceptance criteria
+
+- The `LOOKUP` sheet is a fixed template — only the `DATA` rows, the four freshness dates, the input pre-fill, and the row counts (R) vary per export.
+- A non-carrying competitor must show **"not listed"** (not `$0.00`); a part absent from Dicker shows **"not stocked"**; a competitor that carries a part but has zero stock shows **SOH 0** with its real price.
+- Competitor price renders **red when Dicker is dearer, green when cheaper** (live conditional formatting, not baked colours).
+- Freshness "days old" uses `=TODAY()` so it stays live each day the file is opened; status flips green → amber → red at the 1-day and 3-day thresholds.
+- Opening the downloaded file requires no Power Query, no refresh, no external connection — it is fully self-contained.
+- Verify: download a Samsung file, confirm a known part (e.g. the 24" monitor `LS24D402GEEXXY`) shows Dicker plus the three competitors indented beneath, with the correct red/green flags, and the freshness panel shows the four upload dates with correct staleness colours.

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, AlertCircle, CheckCircle2, Clock, Database, ArrowRightLeft, DollarSign } from "lucide-react";
 import { format } from "date-fns";
+import { DownloadCompareFile } from "@/components/download-compare-file";
 
 export default function Dashboard() {
   const { data: summary, isLoading } = useGetDashboardSummary({
@@ -115,6 +116,8 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      <DownloadCompareFile />
     </div>
   );
 }
