@@ -38,13 +38,20 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   req.session.userId = user.id;
-  res.json(LoginResponse.parse({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    createdAt: user.createdAt.toISOString(),
-  }));
+  req.session.save((err) => {
+    if (err) {
+      req.log.error({ err }, "Failed to save session");
+      res.status(500).json({ error: "Internal server error" });
+      return;
+    }
+    res.json(LoginResponse.parse({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    }));
+  });
 });
 
 router.post("/auth/logout", async (req, res): Promise<void> => {
