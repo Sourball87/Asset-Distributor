@@ -143,27 +143,33 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   }
 
   // ─── LOOKUP sheet ──────────────────────────────────────────
-  const R = 50; // fixed input slots — user pastes their own SKUs
-  const IN_START    = 12;
-  const IN_END      = 11 + R;
-  const RESULTS_ROW = IN_END + 2;
-  const COL_HDR_ROW = IN_END + 3;
-  const OUT0        = IN_END + 4;
+  // New layout: each block is 4 rows tall.
+  // Col A (merged, tall) = yellow input cell where user types the VPN.
+  // Cols B-E = Dicker + competitor rows side-by-side within those 4 rows.
+  // No separate input list or results section — everything is in-line.
 
-  ws.views = [{ showGridLines: false, state: "frozen", xSplit: 0, ySplit: 11 }];
-  ws.getColumn("A").width = 34;
-  ws.getColumn("B").width = 60;
+  const R     = 50;          // number of lookup blocks
+  const START = 12;          // first block starts at row 12
+  const HDR   = START - 1;  // column header row = 11
+  const LAST  = START + 4 * R - 1;
+
+  // Column widths (per spec)
+  ws.getColumn("A").width = 26;
+  ws.getColumn("B").width = 56;
   ws.getColumn("C").width = 9;
   ws.getColumn("D").width = 12;
   ws.getColumn("E").width = 10;
+
+  // Freeze rows 1–11 (freshness strip + block header stay visible while scrolling)
+  ws.views = [{ showGridLines: false, state: "frozen", xSplit: 0, ySplit: HDR }];
 
   // Row 1 — title
   ws.getRow(1).height = 30;
   ws.mergeCells("A1:E1");
   const titleCell = ws.getCell("A1");
-  titleCell.value = "DICKER DATA — PRICE & STOCK LOOKUP";
-  titleCell.font  = fnt({ bold: true, size: 14, color: { argb: WHITE } });
-  titleCell.fill  = solid(DARK);
+  titleCell.value     = "DICKER DATA — PRICE & STOCK LOOKUP";
+  titleCell.font      = fnt({ bold: true, size: 14, color: { argb: WHITE } });
+  titleCell.fill      = solid(DARK);
   titleCell.alignment = { horizontal: "center", vertical: "middle" };
 
   // Row 3 — freshness panel label
@@ -217,7 +223,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   ws.addConditionalFormatting({
     ref: "D5:D8",
     rules: [
-      { type: "expression", priority: 1, formulae: [`$C5>3`],            style: { font: { bold: true, color: { argb: RED_C   } } } },
+      { type: "expression", priority: 1, formulae: [`$C5>3`],             style: { font: { bold: true, color: { argb: RED_C   } } } },
       { type: "expression", priority: 2, formulae: [`AND($C5>1,$C5<=3)`], style: { font: { bold: true, color: { argb: AMBER_C } } } },
       { type: "expression", priority: 3, formulae: [`$C5<=1`],            style: { font: { bold: true, color: { argb: GREEN_C } } } },
     ],
@@ -226,208 +232,142 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   // Row 10 — instruction
   ws.mergeCells("A10:E10");
   const instrCell = ws.getCell("A10");
-  instrCell.value = "Paste vendor part numbers in the yellow cells (one per row). Results render below automatically.";
+  instrCell.value = "Type a vendor part number in each yellow cell (column A). Stock and pricing resolve automatically to the right.";
   instrCell.font  = fnt({ italic: true, color: { argb: GREY } });
 
-  // Row 11 — input column header
-  const pnHdr = ws.getCell("A11");
-  pnHdr.value     = "PART NUMBER";
-  pnHdr.font      = fnt({ bold: true, color: { argb: WHITE } });
-  pnHdr.fill      = solid(DARK);
-  pnHdr.alignment = { horizontal: "left", indent: 1 };
-
-  // Rows 12…IN_END — empty input cells (user pastes their own SKUs)
-  const thinIN = thin(IN_BORDER);
-  for (let i = 0; i < R; i++) {
-    const c = ws.getCell(IN_START + i, 1);
-    c.fill   = solid(INFILL);
-    c.font   = fnt();
-    c.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
-  }
-
-  // RESULTS label
-  ws.mergeCells(`A${RESULTS_ROW}:E${RESULTS_ROW}`);
-  const resLabel = ws.getCell(`A${RESULTS_ROW}`);
-  resLabel.value = "RESULTS";
-  resLabel.font  = fnt({ bold: true, size: 11, color: { argb: DARK } });
-
-  // Output column headers
-  const colHdrLabels = ["Part Number","Description / Distributor","SOH","Price (ex)","On Order"];
+  // Row 11 — block column header
+  const colHdrLabels = ["Part Number", "Description / Distributor", "SOH", "Price (ex)", "On Order"];
   colHdrLabels.forEach((h, i) => {
-    const c = ws.getCell(COL_HDR_ROW, i + 1);
+    const c = ws.getCell(HDR, i + 1);
     c.value     = h;
     c.font      = fnt({ bold: true, color: { argb: WHITE } });
     c.fill      = solid(DARK);
     c.alignment = { horizontal: i <= 1 ? "left" : "center", vertical: "middle", indent: i <= 1 ? 1 : 0 };
   });
 
-  // ─── Output blocks (one 4-row block per input slot) ─────────
-  const USE_FORMULAS = R <= 500;
-  const topBorder = { top: thin(BLK_BORDER) };
+  // ─── 4-row blocks ──────────────────────────────────────────
+  // Block k (0-based): base = START + 4*k
+  //   A{base}:A{base+3} — merged, yellow, user types VPN here
+  //   B{base}  / C{base}  / D{base}          — Dicker row (description / SOH / price)
+  //   B{base+1}/ C{base+1}/ D{base+1}/ E{base+1} — Ingram  row
+  //   B{base+2}/ C{base+2}/ D{base+2}        — Synnex  row
+  //   B{base+3}/ C{base+3}/ D{base+3}        — Leader  row
+  //   Thin BLK_BORDER top border across A–E on the Dicker row.
+
+  const thinIN  = thin(IN_BORDER);
+  const topBlk  = thin(BLK_BORDER);
 
   for (let k = 0; k < R; k++) {
-    const base = OUT0 + 4 * k;
-    const ic   = `$A$${IN_START + k}`;
-    const mf   = `MATCH(UPPER(SUBSTITUTE(TRIM(${ic})," ","")),DATA!$A:$A,0)`;
+    const base  = START + 4 * k;
+    const ic    = `$A$${base}`;   // absolute ref to the merged input cell
+    const norm  = `UPPER(SUBSTITUTE(TRIM(${ic})," ",""))`;
+    const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
 
-    if (USE_FORMULAS) {
-      // Dicker row
-      const aD = ws.getCell(base, 1);
-      aD.value  = { formula: `IF(${ic}="","",${ic})` };
-      aD.font   = fnt({ bold: true, color: { argb: DARK } });
-      aD.border = topBorder;
+    // Merge A{base}:A{base+3} — tall yellow input cell
+    ws.mergeCells(base, 1, base + 3, 1);
+    const inputCell      = ws.getCell(base, 1);
+    inputCell.fill       = solid(INFILL);
+    inputCell.font       = fnt({ bold: true, color: { argb: DARK } });
+    inputCell.alignment  = { vertical: "middle", wrapText: false };
+    inputCell.border     = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
 
-      const bD = ws.getCell(base, 2);
-      bD.value  = { formula: `IF(${ic}="","",IFERROR(INDEX(DATA!$C:$C,${mf}),"— part not found —"))` };
-      bD.border = topBorder;
+    // Top separator border on entire Dicker row
+    const brkBorder = { top: topBlk };
+    ws.getCell(base, 2).border = brkBorder;
+    ws.getCell(base, 3).border = brkBorder;
+    ws.getCell(base, 4).border = brkBorder;
+    ws.getCell(base, 5).border = brkBorder;
 
-      const cD = ws.getCell(base, 3);
-      cD.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base}),INDEX(DATA!$D:$D,${mf}),""))` };
-      cD.font      = fnt({ bold: true, color: { argb: DARK } });
-      cD.alignment = { horizontal: "center" };
-      cD.border    = topBorder;
+    // Dicker row — B, C, D (row = base)
+    const bD = ws.getCell(base, 2);
+    bD.value  = { formula: `IF(${ic}="","",IFERROR(INDEX(DATA!$C:$C,${mf}),"— part not found —"))` };
+    bD.font   = fnt({ bold: true, color: { argb: DARK } });
 
-      const dD = ws.getCell(base, 4);
-      dD.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$E:$E,${mf})=0,"not stocked",INDEX(DATA!$E:$E,${mf})),"not stocked"))` };
-      dD.font      = fnt({ bold: true, color: { argb: DARK } });
-      dD.alignment = { horizontal: "center" };
-      dD.numFmt    = "$#,##0.00";
-      dD.border    = topBorder;
+    const cD = ws.getCell(base, 3);
+    cD.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base}),INDEX(DATA!$D:$D,${mf}),""))` };
+    cD.font      = fnt({ bold: true, color: { argb: DARK } });
+    cD.alignment = { horizontal: "center" };
 
-      ws.getCell(base, 5).border = topBorder;
+    const dD = ws.getCell(base, 4);
+    dD.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$E:$E,${mf})=0,"not stocked",INDEX(DATA!$E:$E,${mf})),"not stocked"))` };
+    dD.font      = fnt({ bold: true, color: { argb: DARK } });
+    dD.alignment = { horizontal: "center" };
+    dD.numFmt    = "$#,##0.00";
 
-      // Ingram row
-      const bI = ws.getCell(base + 1, 2);
-      bI.value     = { formula: `IF(${ic}="","","▸ Ingram")` };
-      bI.font      = fnt({ color: { argb: TEAL } });
-      bI.alignment = { horizontal: "right" };
+    // Ingram row — B, C, D, E (row = base+1)
+    const bI = ws.getCell(base + 1, 2);
+    bI.value     = { formula: `IF(${ic}="","","▸ Ingram")` };
+    bI.font      = fnt({ color: { argb: TEAL } });
+    bI.alignment = { horizontal: "right" };
 
-      const cI = ws.getCell(base + 1, 3);
-      cI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$F:$F,${mf}),""))` };
-      cI.alignment = { horizontal: "center" };
+    const cI = ws.getCell(base + 1, 3);
+    cI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$F:$F,${mf}),""))` };
+    cI.alignment = { horizontal: "center" };
 
-      const dI = ws.getCell(base + 1, 4);
-      dI.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$G:$G,${mf})=0,"not listed",INDEX(DATA!$G:$G,${mf})),"not listed"))` };
-      dI.alignment = { horizontal: "center" };
-      dI.numFmt    = "$#,##0.00";
+    const dI = ws.getCell(base + 1, 4);
+    dI.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$G:$G,${mf})=0,"not listed",INDEX(DATA!$G:$G,${mf})),"not listed"))` };
+    dI.alignment = { horizontal: "center" };
+    dI.numFmt    = "$#,##0.00";
 
-      const eI = ws.getCell(base + 1, 5);
-      eI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$H:$H,${mf}),""))` };
-      eI.alignment = { horizontal: "center" };
+    const eI = ws.getCell(base + 1, 5);
+    eI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$H:$H,${mf}),""))` };
+    eI.alignment = { horizontal: "center" };
 
-      // Synnex row
-      const bS = ws.getCell(base + 2, 2);
-      bS.value     = { formula: `IF(${ic}="","","▸ Synnex")` };
-      bS.font      = fnt({ color: { argb: TEAL } });
-      bS.alignment = { horizontal: "right" };
+    // Synnex row — B, C, D (row = base+2)
+    const bS = ws.getCell(base + 2, 2);
+    bS.value     = { formula: `IF(${ic}="","","▸ Synnex")` };
+    bS.font      = fnt({ color: { argb: TEAL } });
+    bS.alignment = { horizontal: "right" };
 
-      const cS = ws.getCell(base + 2, 3);
-      cS.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 2}),INDEX(DATA!$I:$I,${mf}),""))` };
-      cS.alignment = { horizontal: "center" };
+    const cS = ws.getCell(base + 2, 3);
+    cS.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 2}),INDEX(DATA!$I:$I,${mf}),""))` };
+    cS.alignment = { horizontal: "center" };
 
-      const dS = ws.getCell(base + 2, 4);
-      dS.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$J:$J,${mf})=0,"not listed",INDEX(DATA!$J:$J,${mf})),"not listed"))` };
-      dS.alignment = { horizontal: "center" };
-      dS.numFmt    = "$#,##0.00";
+    const dS = ws.getCell(base + 2, 4);
+    dS.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$J:$J,${mf})=0,"not listed",INDEX(DATA!$J:$J,${mf})),"not listed"))` };
+    dS.alignment = { horizontal: "center" };
+    dS.numFmt    = "$#,##0.00";
 
-      // Leader row
-      const bL = ws.getCell(base + 3, 2);
-      bL.value     = { formula: `IF(${ic}="","","▸ Leader")` };
-      bL.font      = fnt({ color: { argb: TEAL } });
-      bL.alignment = { horizontal: "right" };
+    // Leader row — B, C, D (row = base+3)
+    const bL = ws.getCell(base + 3, 2);
+    bL.value     = { formula: `IF(${ic}="","","▸ Leader")` };
+    bL.font      = fnt({ color: { argb: TEAL } });
+    bL.alignment = { horizontal: "right" };
 
-      const cL = ws.getCell(base + 3, 3);
-      cL.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 3}),INDEX(DATA!$K:$K,${mf}),""))` };
-      cL.alignment = { horizontal: "center" };
+    const cL = ws.getCell(base + 3, 3);
+    cL.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 3}),INDEX(DATA!$K:$K,${mf}),""))` };
+    cL.alignment = { horizontal: "center" };
 
-      const dL = ws.getCell(base + 3, 4);
-      dL.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$L:$L,${mf})=0,"not listed",INDEX(DATA!$L:$L,${mf})),"not listed"))` };
-      dL.alignment = { horizontal: "center" };
-      dL.numFmt    = "$#,##0.00";
-
-    } else {
-      // Static values (R > 500)
-      const row = dataRows[k];
-
-      const aD = ws.getCell(base, 1);
-      aD.value  = row.key;
-      aD.font   = fnt({ bold: true, color: { argb: DARK } });
-      aD.border = topBorder;
-
-      const bD = ws.getCell(base, 2);
-      bD.value  = row.desc || "— part not found —";
-      bD.border = topBorder;
-
-      const cD = ws.getCell(base, 3);
-      cD.value     = row.dicker_soh;
-      cD.font      = fnt({ bold: true, color: { argb: DARK } });
-      cD.alignment = { horizontal: "center" };
-      cD.border    = topBorder;
-
-      const dD = ws.getCell(base, 4);
-      dD.value     = row.dicker_price ?? "not stocked";
-      dD.font      = fnt({ bold: true, color: { argb: DARK } });
-      dD.alignment = { horizontal: "center" };
-      if (row.dicker_price != null) dD.numFmt = "$#,##0.00";
-      dD.border    = topBorder;
-
-      ws.getCell(base, 5).border = topBorder;
-
-      const bI = ws.getCell(base + 1, 2);
-      bI.value     = "▸ Ingram";
-      bI.font      = fnt({ color: { argb: TEAL } });
-      bI.alignment = { horizontal: "right" };
-      const cI = ws.getCell(base + 1, 3);
-      cI.value = row.ingram_soh; cI.alignment = { horizontal: "center" };
-      const dI = ws.getCell(base + 1, 4);
-      dI.value = row.ingram_price ?? "not listed"; dI.alignment = { horizontal: "center" };
-      if (row.ingram_price != null) dI.numFmt = "$#,##0.00";
-      const eI = ws.getCell(base + 1, 5);
-      eI.value = row.ingram_oo; eI.alignment = { horizontal: "center" };
-
-      const bS = ws.getCell(base + 2, 2);
-      bS.value     = "▸ Synnex";
-      bS.font      = fnt({ color: { argb: TEAL } });
-      bS.alignment = { horizontal: "right" };
-      const cS = ws.getCell(base + 2, 3);
-      cS.value = row.synnex_soh; cS.alignment = { horizontal: "center" };
-      const dS = ws.getCell(base + 2, 4);
-      dS.value = row.synnex_price ?? "not listed"; dS.alignment = { horizontal: "center" };
-      if (row.synnex_price != null) dS.numFmt = "$#,##0.00";
-
-      const bL = ws.getCell(base + 3, 2);
-      bL.value     = "▸ Leader";
-      bL.font      = fnt({ color: { argb: TEAL } });
-      bL.alignment = { horizontal: "right" };
-      const cL = ws.getCell(base + 3, 3);
-      cL.value = row.leader_soh; cL.alignment = { horizontal: "center" };
-      const dL = ws.getCell(base + 3, 4);
-      dL.value = row.leader_price ?? "not listed"; dL.alignment = { horizontal: "center" };
-      if (row.leader_price != null) dL.numFmt = "$#,##0.00";
-    }
+    const dL = ws.getCell(base + 3, 4);
+    dL.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$L:$L,${mf})=0,"not listed",INDEX(DATA!$L:$L,${mf})),"not listed"))` };
+    dL.alignment = { horizontal: "center" };
+    dL.numFmt    = "$#,##0.00";
   }
 
-  // Price conditional formatting over output range (formula mode only)
-  if (USE_FORMULAS && R > 0) {
-    const cfRef = `D${OUT0}:D${OUT0 + 4 * R - 1}`;
-    ws.addConditionalFormatting({
-      ref: cfRef,
-      rules: [
-        {
-          type: "expression",
-          priority: 1,
-          formulae: [`AND(MOD(ROW()-${OUT0},4)<>0,ISNUMBER(D${OUT0}),ISNUMBER(INDEX($D:$D,${OUT0}+4*INT((ROW()-${OUT0})/4))),D${OUT0}<INDEX($D:$D,${OUT0}+4*INT((ROW()-${OUT0})/4)))`],
-          style: { font: { bold: true, color: { argb: RED_C   } } },
-        },
-        {
-          type: "expression",
-          priority: 2,
-          formulae: [`AND(MOD(ROW()-${OUT0},4)<>0,ISNUMBER(D${OUT0}),ISNUMBER(INDEX($D:$D,${OUT0}+4*INT((ROW()-${OUT0})/4))),D${OUT0}>INDEX($D:$D,${OUT0}+4*INT((ROW()-${OUT0})/4)))`],
-          style: { font: { bold: true, color: { argb: GREEN_C } } },
-        },
-      ],
-    });
-  }
+  // ─── Price conditional formatting ─────────────────────────
+  // Applied over D{START}:D{LAST}.
+  // For each row r, the Dicker price for its block is at D{START + 4*INT((r-START)/4)}.
+  // Competitor rows satisfy MOD(r-START,4) <> 0.
+  // Red  = competitor D < Dicker D (Dicker dearer)
+  // Green = competitor D > Dicker D (Dicker competitive)
+  const cfRef = `D${START}:D${LAST}`;
+  ws.addConditionalFormatting({
+    ref: cfRef,
+    rules: [
+      {
+        type: "expression",
+        priority: 1,
+        formulae: [`AND(MOD(ROW()-${START},4)<>0,ISNUMBER(D${START}),ISNUMBER(INDEX($D:$D,${START}+4*INT((ROW()-${START})/4))),D${START}<INDEX($D:$D,${START}+4*INT((ROW()-${START})/4)))`],
+        style: { font: { bold: true, color: { argb: RED_C   } } },
+      },
+      {
+        type: "expression",
+        priority: 2,
+        formulae: [`AND(MOD(ROW()-${START},4)<>0,ISNUMBER(D${START}),ISNUMBER(INDEX($D:$D,${START}+4*INT((ROW()-${START})/4))),D${START}>INDEX($D:$D,${START}+4*INT((ROW()-${START})/4)))`],
+        style: { font: { bold: true, color: { argb: GREEN_C } } },
+      },
+    ],
+  });
 
   // ── Stream response ──────────────────────────────────────────
   const brandLabel = selectedBrands.length > 0 ? selectedBrands.join("_") : "ALL";

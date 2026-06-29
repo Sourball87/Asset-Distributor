@@ -1,0 +1,64 @@
+This replaces the LOOKUP sheet layout in the previous "Download Compare File" prompt. Everything else (the brand filter, the backend query, the hidden DATA sheet, ExcelJS, the freshness panel, the palette, the conditional-formatting logic) stays exactly the same. The only change: the comparison for each part number now renders immediately to the right of where the part number is entered, on the same rows, instead of in a separate "RESULTS" section below. The user never scrolls down to see a result.
+
+What changes
+
+Each entry is a 4-row block. The part number sits in a single tall cell on the left; its Dicker + competitor comparison renders to the right, stacked across those same four rows.
+
+Drop the old split (top input list + bottom results section). There is now no separate results area.
+
+Column layout (LOOKUP sheet)
+
+Widths A–E: 26, 56, 9, 12, 10. Hide gridlines. Keep the freshness panel (rows 1–8) and the instruction line exactly as before. Add the block header at the row below the instruction, then the blocks start two rows under the title area — pick a START row (e.g. row 12).
+
+
+A — Part Number (input). Yellow (FFF7D6) with a thin D9C97A border. For each block, merge A{base}:A{base+3} into one tall cell, vertically centered, bold DARK. This is where the PM types/pastes the part number. (For the pre-populated download, write the brand's part number here per block.)
+B — Description / Distributor. Dicker row = the product description; the three competitor rows = ▸ Ingram / ▸ Synnex / ▸ Leader, right-aligned, TEAL.
+C — SOH, centered.
+D — Price (ex), centered, number format $#,##0.00.
+E — On Order, centered (Ingram row only).
+
+
+Block header row (once, above the first block): A "Part Number", B "Description / Distributor", C "SOH", D "Price (ex)", E "On Order" — white bold on DARK.
+
+Per-block formulas
+
+For block k (0-based), base = START + 4*k. The input is the merged cell, whose value lives in A{base}. Let inref = $A${base}, nk = UPPER(SUBSTITUTE(TRIM(inref)," ","")), m = MATCH(nk,DATA!$A:$A,0).
+
+Row base — Dicker:
+
+
+B = =IF(inref="","",IFERROR(INDEX(DATA!$C:$C,m),"— part not found —")) (description, DARK).
+C = =IF(inref="","",IF(ISNUMBER($D{base}),INDEX(DATA!$D:$D,m),"")) (bold DARK, centered).
+D = =IF(inref="","",IFERROR(IF(INDEX(DATA!$E:$E,m)=0,"not stocked",INDEX(DATA!$E:$E,m)),"not stocked")) (bold DARK, centered, $#,##0.00).
+Thin top border (C7CCD4) across A–E to separate blocks.
+
+
+Row base+1 — Ingram:
+
+
+B = =IF(inref="","","▸ Ingram") (TEAL, right-aligned).
+C = =IF(inref="","",IF(ISNUMBER($D{base+1}),INDEX(DATA!$F:$F,m),"")).
+D = =IF(inref="","",IFERROR(IF(INDEX(DATA!$G:$G,m)=0,"not listed",INDEX(DATA!$G:$G,m)),"not listed")) ($#,##0.00).
+E = =IF(inref="","",IF(ISNUMBER($D{base+1}),INDEX(DATA!$H:$H,m),"")) (Ingram on-order).
+
+
+Row base+2 — Synnex: B = "▸ Synnex"; C uses DATA!$I:$I; D uses DATA!$J:$J; no E.
+
+Row base+3 — Leader: B = "▸ Leader"; C uses DATA!$K:$K; D uses DATA!$L:$L; no E.
+
+Conditional formatting (unchanged logic, new column)
+
+Competitor price still flags red when Dicker is dearer, green when cheaper, comparing each competitor's price (column D) to its block's Dicker price D{base}. Apply over the whole block price range D{START}:D{lastBlockRow} as expression rules anchored on the first block's price cell:
+
+
+red bold where =AND(MOD(ROW()-{START},4)<>0,ISNUMBER(D{START}),ISNUMBER(INDEX($D:$D,{START}+4*INT((ROW()-{START})/4))),D{START}<INDEX($D:$D,{START}+4*INT((ROW()-{START})/4)))
+green bold where the final comparison is > instead of <
+
+
+Notes
+
+
+One part number per block (the input cell spans the block's four rows). This is the deliberate cost of the side-by-side layout — there's no single column to paste a long list into. Entering parts is one-per-block; for the pre-populated download Replit fills each block's input cell automatically, so the file opens fully rendered with no scrolling.
+Freeze panes just under the freshness panel so the freshness strip and block header stay visible while scrolling through blocks.
+Number the blocks down the page sized to the count of products in the selected brand(s); for very large brands render the result rows as static values rather than formulas (same look), as already noted in the main prompt.
+Everything visual is otherwise identical to the approved lookup tool: indented teal competitor labels, "not listed" / "not stocked" handling, red/green price flags, freshness panel with live =TODAY() staleness.
