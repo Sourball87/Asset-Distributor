@@ -2,8 +2,9 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
@@ -25,30 +26,44 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
-function sniffDelimiter(line: string): string {
+function sniffDelimiter(sample: string): string {
   const counts = {
-    "\t": (line.match(/\t/g) || []).length,
-    ",": (line.match(/,/g) || []).length,
-    "|": (line.match(/\|/g) || []).length,
+    "\t": (sample.match(/\t/g) || []).length,
+    ",": (sample.match(/,/g) || []).length,
+    "|": (sample.match(/\|/g) || []).length,
   };
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
 
 function parseDelimited(content: string, delimiter: string, headerRowIndex: number): { columns: string[]; rows: Record<string, string>[] } {
-  const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const headerLine = lines[headerRowIndex];
-  if (!headerLine) return { columns: [], rows: [] };
-  const columns = headerLine.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ""));
-  const rows: Record<string, string>[] = [];
-  for (let i = headerRowIndex + 1; i < lines.length; i++) {
-    const cells = lines[i].split(delimiter);
-    const row: Record<string, string> = {};
-    columns.forEach((col, idx) => {
-      row[col] = (cells[idx] ?? "").trim().replace(/^"|"$/g, "");
-    });
-    rows.push(row);
+  try {
+    const records = csvParseSync(content, {
+      delimiter,
+      from_line: headerRowIndex + 1,
+      skip_empty_lines: true,
+      relax_column_count: true,
+      trim: true,
+    }) as string[][];
+
+    if (!records.length) return { columns: [], rows: [] };
+
+    const columns = records[0].map((c) => String(c ?? "").trim());
+    const rows: Record<string, string>[] = [];
+
+    for (let i = 1; i < records.length; i++) {
+      const cells = records[i];
+      if (!cells || cells.every((c) => !c)) continue;
+      const row: Record<string, string> = {};
+      columns.forEach((col, idx) => {
+        row[col] = String(cells[idx] ?? "").trim();
+      });
+      rows.push(row);
+    }
+
+    return { columns, rows };
+  } catch {
+    return { columns: [], rows: [] };
   }
-  return { columns, rows };
 }
 
 async function parseXlsx(filePath: string, headerRowIndex: number): Promise<{ columns: string[]; rows: Record<string, string>[] }> {

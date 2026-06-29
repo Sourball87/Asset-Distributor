@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Comparison from "@/pages/comparison";
+import ImportPage from "@/pages/import";
 import Distributors from "@/pages/settings/distributors";
 import Brands from "@/pages/settings/brands";
 import NotFound from "@/pages/not-found";
@@ -53,6 +54,14 @@ function Router() {
         {() => (
           <Layout>
             <ProtectedRoute component={Comparison} />
+          </Layout>
+        )}
+      </Route>
+
+      <Route path="/import">
+        {() => (
+          <Layout>
+            <ProtectedRoute component={ImportPage} />
           </Layout>
         )}
       </Route>

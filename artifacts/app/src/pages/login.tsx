@@ -42,7 +42,8 @@ export default function Login() {
         setLocation("/");
       },
       onError: (err) => {
-        setError(err.error || "Login failed");
+        const msg = (err.data as { error?: string } | null)?.error;
+        setError(msg ?? "Login failed");
       },
     },
   });

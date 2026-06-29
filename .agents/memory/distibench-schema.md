@@ -21,13 +21,30 @@ Alias map lives in the `brands` DB table (editable UI). Matching is case+whitesp
 **Why:** Comparison logic assumes exactly one baseline (Dicker Data). Multiple baselines would break price delta calculations.
 
 ## Session storage
-Sessions stored in Postgres via `connect-pg-simple` with `createTableIfMissing: true`. Table: `user_sessions`. Secret from `SESSION_SECRET` env var.
+Sessions stored in Postgres via `connect-pg-simple` with `createTableIfMissing: true`. Table: `user_sessions`. Secret from `SESSION_SECRET` env var. `trust proxy: 1` set in Express app. `credentials: 'include'` set globally in `customFetch`. Auth context only clears user on initial check — background refetch errors do not log user out.
 
 ## Import pipeline seam
 Parse → Preview → Commit is a 3-step flow. `ParseUpload` writes to `artifacts/api-server/uploads/` (temp file). `CommitUpload` reads the temp file by `tempFileKey`. This makes automated feeds easy to add — just skip the file upload step and call Commit directly.
 
+## CSV parsing — csv-parse required
+Server uses `csv-parse/sync` for all delimited files (comma and tab). The naive `split(delimiter)` approach breaks on Leader Systems files because their LONG DESCRIPTION field contains HTML with embedded commas and newlines (multi-line quoted CSV fields). `csv-parse` handles this correctly.
+
+**Why:** Leader's export has RFC 4180 quoted multi-line fields. Simple split breaks them.
+
+**How to apply:** Any future changes to `parseDelimited()` in `artifacts/api-server/src/routes/uploads.ts` must keep `csv-parse/sync` for correctness.
+
+## Commit source format — no "csv" enum
+`CommitUploadInputSourceFormat` only has `xlsx` and `txt`. CSV files are committed as `txt` format with the delimiter passed separately. The backend doesn't distinguish CSV from TXT in parsing — it uses the `delimiter` param regardless of `sourceFormat`.
+
+## Known distributor file formats
+- Ingram Micro: comma CSV (.TXT ext), VPN=`Vendor Part Number`, Brand=`Vendor Name`, Price=`Customer Price`, SOH=`Available Quantity`, SOO=`Backlog Information`
+- Leader Systems: quoted comma CSV (.csv ext), VPN=`MANUFACTURER SKU`, Brand=`MANUFACTURER`, Price=`DBP`, SOH=`AT` (has ">20" / "CALL" values → treated as numeric or null)
+- Synnex: tab-separated (.txt ext), VPN=`MANUFACTURER_PART_NUMBER`, Brand=`MANUFACTURER_NAME`, Price=`RESELLER_BUY_EX`, SOH=`TOTAL_AVAILABILITY`
+
 ## Movement computation
 Computed on read (v1) by ordering `stock_snapshots` for product+distributor by `snapshot_date` DESC and diffing `[0].soh - [1].soh`. Materialize only if performance requires it.
 
-## Seed credentials
-Admin: `admin@dickerdata.com` / `admin`. Hash was generated with bcryptjs 10 rounds from `artifacts/api-server` dir.
+## Seed credentials / distributors
+- Admin: `admin@dickerdata.com.au` / `admin`
+- Distributors: Dicker Data (id=1, baseline), Ingram Micro (id=2), Leader Systems (id=3), Synnex (id=4)
+- If distributors table is empty, re-seed from replit.md values
