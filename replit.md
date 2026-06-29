@@ -77,7 +77,7 @@ A web application for product managers at an IT distributor to benchmark pricing
 
 ## Seed / demo data
 
-- Admin user: `admin@dickerdata.com` / `admin`
+- Admin user: `admin@dickerdata.com.au` / `admin`
 - Baseline distributor: Dicker Data (is_baseline = true)
 - 8 tracked brands pre-seeded with aliases: SAMSUNG, DELL, APC, TP LINK, NETGEAR, SEAGATE, ASUS, LENOVO
 

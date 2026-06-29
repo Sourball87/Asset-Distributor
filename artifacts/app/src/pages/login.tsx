@@ -81,7 +81,7 @@ export default function Login() {
                   <FormItem className="space-y-1">
                     <FormLabel className="text-xs">Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="admin@dickerdata.com" {...field} className="h-8 text-sm rounded-sm" />
+                      <Input placeholder="admin@dickerdata.com.au" {...field} className="h-8 text-sm rounded-sm" />
                     </FormControl>
                     <FormMessage className="text-xs" />
                   </FormItem>
@@ -109,7 +109,7 @@ export default function Login() {
         <CardFooter className="flex flex-col border-t border-border pt-4 bg-muted/20">
           <div className="text-xs text-muted-foreground text-center">
             Demo credentials:<br/>
-            <span className="font-mono text-foreground">admin@dickerdata.com</span> / <span className="font-mono text-foreground">admin</span>
+            <span className="font-mono text-foreground">admin@dickerdata.com.au</span> / <span className="font-mono text-foreground">admin</span>
           </div>
         </CardFooter>
       </Card>

@@ -11,25 +11,33 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { data: user, isLoading, isError } = useGetMe({
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
+
+  const { data: me, isLoading: queryLoading } = useGetMe({
     query: {
       queryKey: getGetMeQueryKey(),
       retry: false,
+      staleTime: 5 * 60 * 1000,
     },
   });
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-
   useEffect(() => {
-    if (user) {
-      setCurrentUser(user);
-    } else if (isError) {
-      setCurrentUser(null);
+    if (queryLoading) return;
+    if (me) {
+      setCurrentUser(me);
     }
-  }, [user, isError]);
+    setInitialCheckDone(true);
+  }, [me, queryLoading]);
 
   return (
-    <AuthContext.Provider value={{ user: currentUser, isLoading, setUser: setCurrentUser }}>
+    <AuthContext.Provider
+      value={{
+        user: currentUser,
+        isLoading: !initialCheckDone,
+        setUser: setCurrentUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
