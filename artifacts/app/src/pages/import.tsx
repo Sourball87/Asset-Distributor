@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, useId } from "react";
+import { useState, useRef, useCallback, useId, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   useListDistributors,
   getListUploadsQueryKey,
+  getListDistributorsQueryKey,
   CommitUploadInputSourceFormat,
   type ParsePreview,
   type ColumnMapping,
@@ -15,7 +16,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { FileUp, CheckCircle2, AlertCircle, Loader2, X, LogIn } from "lucide-react";
@@ -141,6 +141,11 @@ export default function ImportPage() {
   const [, setLocation] = useLocation();
   const { data: distributors } = useListDistributors();
   const dropZoneId = useId();
+
+  // Force-refresh distributors on mount so newly-added distributors appear immediately
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: getListDistributorsQueryKey() });
+  }, [queryClient]);
 
   function handleAuthExpired() {
     setSessionExpired(true);
@@ -394,16 +399,20 @@ export default function ImportPage() {
                         >
                           <SelectTrigger
                             className={`h-6 text-xs rounded-sm border-0 bg-transparent p-0 focus:ring-0 shadow-none w-full ${
-                              !effectiveDistributorId ? "text-destructive" : ""
+                              !effectiveDistributorId ? "text-muted-foreground" : ""
                             }`}
                           >
-                            <SelectValue
-                              placeholder={
-                                entry.detectedDistributorName
-                                  ? `${entry.detectedDistributorName} (detected)`
-                                  : "— select distributor —"
-                              }
-                            />
+                            {/* Compute display name explicitly — SelectValue goes blank when
+                                the matched ID isn't in the distributors list yet (stale cache) */}
+                            <span className="truncate">
+                              {effectiveDistributorId
+                                ? (distributors?.find((d) => d.id === effectiveDistributorId)?.name
+                                    ?? entry.detectedDistributorName
+                                    ?? String(effectiveDistributorId))
+                                : (entry.detectedDistributorName
+                                    ? `${entry.detectedDistributorName} (detected)`
+                                    : "— select distributor —")}
+                            </span>
                           </SelectTrigger>
                           <SelectContent>
                             {(distributors ?? []).map((d) => (
