@@ -59,7 +59,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         ss.sku_type
       FROM stock_snapshots ss
       WHERE ss.product_id IN (SELECT id FROM brand_products)
-      ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC
+      ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
     ),
     dicker AS (
       SELECT ls.product_id, ls.sell_price, ls.soh, ls.soo, ls.snapshot_date
