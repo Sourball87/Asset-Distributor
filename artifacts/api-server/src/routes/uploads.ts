@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
@@ -236,6 +236,128 @@ async function parseXlsx(filePath: string, headerRowIndex: number): Promise<{ co
   return { columns, rows };
 }
 
+// ---------------------------------------------------------------------------
+// Batched commit helper — replaces the O(3n) per-row query loop
+// ---------------------------------------------------------------------------
+
+type BrandMap = Awaited<ReturnType<typeof buildBrandMap>>;
+
+interface ParsedSnapshotRow {
+  vpnNormalized: string;
+  vpnDisplay: string;
+  canonicalBrand: string;
+  description: string;
+  sellPrice: string | null;
+  soh: number | null;
+  soo: number | null;
+}
+
+const DB_CHUNK = 500;
+
+async function commitRowsBatched(
+  rows: Record<string, string>[],
+  mapping: Record<string, string | null>,
+  uploadId: number,
+  distId: number,
+  snapshotDate: string,
+  brandMap: BrandMap,
+): Promise<number> {
+  // 1. Parse + filter all rows in memory (no DB hits)
+  const parsed: ParsedSnapshotRow[] = [];
+  const seenVpn = new Set<string>();
+
+  for (const row of rows) {
+    const rawVpn = row[mapping.vpn as string] ?? "";
+    if (!rawVpn.trim()) continue;
+
+    const canonicalBrand = resolveCanonicalBrand(row[mapping.brand as string] ?? "", brandMap);
+    if (!canonicalBrand) continue;
+
+    const vpnNormalized = normalizeVpn(rawVpn);
+    const rawPrice = row[mapping.sell_price as string] ?? "";
+    const rawSoh = row[mapping.soh as string] ?? "";
+    const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
+    const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
+    const soh = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
+    const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
+
+    parsed.push({
+      vpnNormalized,
+      vpnDisplay: rawVpn.trim(),
+      canonicalBrand,
+      description: row[mapping.description as string] ?? "",
+      sellPrice: sellPrice != null ? String(sellPrice) : null,
+      soh,
+      soo: soo ?? null,
+    });
+
+    seenVpn.add(vpnNormalized);
+  }
+
+  if (parsed.length === 0) return 0;
+
+  // 2. Deduplicate products by VPN (first occurrence wins for brand/display)
+  const productsByVpn = new Map<string, ParsedSnapshotRow>();
+  for (const r of parsed) {
+    if (!productsByVpn.has(r.vpnNormalized)) productsByVpn.set(r.vpnNormalized, r);
+  }
+  const uniqueProducts = [...productsByVpn.values()];
+
+  // 3. Batch upsert all products — on conflict keep existing brand, update lastSeenAt + description if blank
+  for (let i = 0; i < uniqueProducts.length; i += DB_CHUNK) {
+    const chunk = uniqueProducts.slice(i, i + DB_CHUNK);
+    await db.insert(productsTable)
+      .values(chunk.map((r) => ({
+        vpnNormalized: r.vpnNormalized,
+        vpnDisplay: r.vpnDisplay,
+        brand: r.canonicalBrand,
+        description: r.description,
+      })))
+      .onConflictDoUpdate({
+        target: productsTable.vpnNormalized,
+        set: {
+          description: sql`CASE WHEN ${productsTable.description} = '' THEN EXCLUDED.description ELSE ${productsTable.description} END`,
+          lastSeenAt: new Date(),
+        },
+      });
+  }
+
+  // 4. Fetch all product IDs in one query
+  const vpnList = [...seenVpn];
+  const productRows: { id: number; vpnNormalized: string }[] = [];
+  for (let i = 0; i < vpnList.length; i += DB_CHUNK) {
+    const chunk = vpnList.slice(i, i + DB_CHUNK);
+    const batch = await db.select({ id: productsTable.id, vpnNormalized: productsTable.vpnNormalized })
+      .from(productsTable)
+      .where(inArray(productsTable.vpnNormalized, chunk));
+    productRows.push(...batch);
+  }
+  const vpnToId = new Map<string, number>(productRows.map((p) => [p.vpnNormalized, p.id]));
+
+  // 5. Batch insert all snapshots
+  const snapshots = parsed
+    .map((r) => {
+      const productId = vpnToId.get(r.vpnNormalized);
+      if (!productId) return null;
+      return {
+        uploadId,
+        distributorId: distId,
+        productId,
+        snapshotDate,
+        sellPrice: r.sellPrice,
+        soh: r.soh,
+        soo: r.soo,
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
+
+  for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
+    await db.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
+  }
+
+  return snapshots.length;
+}
+
 // GET /uploads
 router.get("/uploads", requireAuth, async (req, res): Promise<void> => {
   const distributorId = req.query.distributorId ? Number(req.query.distributorId) : undefined;
@@ -388,66 +510,15 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
     })
     .returning();
 
-  let committed = 0;
+  const committed = await commitRowsBatched(
+    rows,
+    mapping as Record<string, string | null>,
+    uploadRecord.id,
+    Number(distributorId),
+    effectiveSnapshotDate,
+    brandMap,
+  );
 
-  for (const row of rows) {
-    const rawVpn = row[mapping.vpn] ?? "";
-    const rawBrand = row[mapping.brand] ?? "";
-    const rawDescription = row[mapping.description] ?? "";
-    const rawPrice = row[mapping.sell_price] ?? "";
-    const rawSoh = row[mapping.soh] ?? "";
-    const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
-
-    if (!rawVpn.trim()) continue;
-
-    const canonicalBrand = resolveCanonicalBrand(rawBrand, brandMap);
-    if (!canonicalBrand) continue;
-
-    const vpnNormalized = normalizeVpn(rawVpn);
-    const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
-    const soh = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
-    const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
-
-    // Upsert product
-    const existing = await db.select().from(productsTable).where(eq(productsTable.vpnNormalized, vpnNormalized)).limit(1);
-
-    let productId: number;
-    if (existing.length > 0) {
-      const p = existing[0];
-      // Flag brand conflict — keep first brand
-      if (p.brand !== canonicalBrand) {
-        req.log.warn({ vpn: vpnNormalized, existingBrand: p.brand, newBrand: canonicalBrand }, "Brand conflict on VPN — keeping original");
-      }
-      await db.update(productsTable).set({
-        description: rawDescription || p.description,
-        lastSeenAt: new Date(),
-      }).where(eq(productsTable.id, p.id));
-      productId = p.id;
-    } else {
-      const [newProduct] = await db.insert(productsTable).values({
-        vpnNormalized,
-        vpnDisplay: rawVpn.trim(),
-        brand: canonicalBrand,
-        description: rawDescription,
-      }).returning();
-      productId = newProduct.id;
-    }
-
-    // Insert snapshot
-    await db.insert(stockSnapshotsTable).values({
-      uploadId: uploadRecord.id,
-      distributorId: Number(distributorId),
-      productId,
-      snapshotDate: effectiveSnapshotDate,
-      sellPrice: sellPrice != null ? String(sellPrice) : null,
-      soh,
-      soo: soo ?? null,
-    });
-
-    committed++;
-  }
-
-  // Update upload record
   await db.update(uploadsTable).set({
     rowCountMatched: committed,
     status: "committed",
@@ -598,55 +669,14 @@ router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" 
     })
     .returning();
 
-  let committed = 0;
-
-  for (const row of rows) {
-    const rawVpn = row[mapping.vpn as string] ?? "";
-    const rawBrand = row[mapping.brand as string] ?? "";
-    const rawDescription = row[mapping.description as string] ?? "";
-    const rawPrice = row[mapping.sell_price as string] ?? "";
-    const rawSoh = row[mapping.soh as string] ?? "";
-    const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
-
-    if (!rawVpn.trim()) continue;
-
-    const canonicalBrand = resolveCanonicalBrand(rawBrand, brandMap);
-    if (!canonicalBrand) continue;
-
-    const vpnNormalized = normalizeVpn(rawVpn);
-    const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
-    const soh = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
-    const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
-
-    const existing = await db.select().from(productsTable).where(eq(productsTable.vpnNormalized, vpnNormalized)).limit(1);
-
-    let productId: number;
-    if (existing.length > 0) {
-      const p = existing[0];
-      await db.update(productsTable).set({ description: rawDescription || p.description, lastSeenAt: new Date() }).where(eq(productsTable.id, p.id));
-      productId = p.id;
-    } else {
-      const [newProduct] = await db.insert(productsTable).values({
-        vpnNormalized,
-        vpnDisplay: rawVpn.trim(),
-        brand: canonicalBrand,
-        description: rawDescription,
-      }).returning();
-      productId = newProduct.id;
-    }
-
-    await db.insert(stockSnapshotsTable).values({
-      uploadId: uploadRecord.id,
-      distributorId: Number(distributorId),
-      productId,
-      snapshotDate: effectiveSnapshotDate,
-      sellPrice: sellPrice != null ? String(sellPrice) : null,
-      soh,
-      soo: soo ?? null,
-    });
-
-    committed++;
-  }
+  const committed = await commitRowsBatched(
+    rows,
+    mapping,
+    uploadRecord.id,
+    Number(distributorId),
+    effectiveSnapshotDate,
+    brandMap,
+  );
 
   await db.update(uploadsTable).set({ rowCountMatched: committed, status: "committed" }).where(eq(uploadsTable.id, uploadRecord.id));
 
