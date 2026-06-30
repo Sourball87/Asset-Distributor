@@ -1,7 +1,7 @@
 import { useGetDashboardSummary, getGetDashboardSummaryQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, AlertCircle, CheckCircle2, Clock, Database, ArrowRightLeft, DollarSign } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { DownloadCompareFile } from "@/components/download-compare-file";
 
@@ -51,38 +51,6 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold tracking-tight">System Overview</h1>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="rounded-sm border-border shadow-none">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 pt-4 px-4">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Products Tracked</CardTitle>
-            <Database className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className="text-2xl font-mono font-medium">{summary.totalProducts.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card className="rounded-sm border-border shadow-none">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 pt-4 px-4">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Dicker Highest Price</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className="text-2xl font-mono font-medium text-amber-600">{summary.dickerMostExpensiveCount.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card className="rounded-sm border-border shadow-none">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 pt-4 px-4">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Net Movement (30d)</CardTitle>
-            <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className={`text-2xl font-mono font-medium ${summary.totalNetMovement > 0 ? 'text-emerald-600' : summary.totalNetMovement < 0 ? 'text-red-600' : ''}`}>
-              {summary.totalNetMovement > 0 ? '+' : ''}{summary.totalNetMovement.toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <div>
