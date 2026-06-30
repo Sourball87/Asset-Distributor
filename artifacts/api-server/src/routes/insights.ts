@@ -43,9 +43,17 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
   // comps: competitor rows
   const SHARED_CTES = `
     brand_products AS (
-      SELECT id, vpn_normalized, vpn_display, description
-      FROM products
-      WHERE brand = $1
+      SELECT p.id, p.vpn_normalized, p.vpn_display, p.description
+      FROM products p
+      WHERE p.brand = $1
+        AND p.description NOT ILIKE '%BUNDLE%'
+        AND p.id NOT IN (
+          SELECT DISTINCT ss.product_id
+          FROM stock_snapshots ss
+          JOIN distributors d ON d.id = ss.distributor_id AND d.is_baseline = true
+          WHERE upper(ss.category) = 'WARRANTY'
+             OR upper(ss.sku_type) = 'BUNDLEDITEM'
+        )
     ),
     latest_ss AS (
       SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
@@ -65,10 +73,6 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       SELECT ls.product_id, ls.sell_price, ls.soh, ls.soo, ls.snapshot_date
       FROM latest_ss ls
       JOIN distributors d ON d.id = ls.distributor_id AND d.is_baseline = true
-      JOIN brand_products bp ON bp.id = ls.product_id
-      WHERE (ls.category IS NULL OR upper(ls.category) <> 'WARRANTY')
-        AND (ls.sku_type IS NULL OR upper(ls.sku_type) <> 'BUNDLEDITEM')
-        AND bp.description NOT ILIKE 'BUNDLE %'
     ),
     comps AS (
       SELECT ls.product_id, ls.distributor_id, d.name AS disti_name, ls.sell_price, ls.soh, ls.soo
