@@ -45,6 +45,7 @@
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@types/node": "catalog:",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
@@ -76,6 +77,7 @@
   },
   "dependencies": {
     "ag-grid-community": "^36.0.0",
-    "ag-grid-react": "^36.0.0"
+    "ag-grid-react": "^36.0.0",
+    "papaparse": "^5.5.4"
   }
 }

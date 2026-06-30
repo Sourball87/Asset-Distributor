@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -486,6 +486,190 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
     uploadedAt: uploadRecord.uploadedAt.toISOString(),
     snapshotDate: effectiveSnapshotDate,
     rowCountTotal,
+    rowCountMatched: committed,
+    status: "committed",
+  });
+});
+
+// POST /uploads/detect — column-only detection for client-side parsed files (no raw file upload)
+router.post("/uploads/detect", requireAuth, express.json({ limit: "2mb" }), async (req, res): Promise<void> => {
+  const { columns, sampleRows = [], rowCountTotal = 0 } = req.body as {
+    columns: string[];
+    sampleRows: Record<string, string>[];
+    rowCountTotal: number;
+  };
+
+  if (!Array.isArray(columns)) {
+    res.status(400).json({ error: "columns array is required" });
+    return;
+  }
+
+  const detection = await detectDistributor(columns);
+
+  const [profile] = detection.distributorId
+    ? await db.select().from(importProfilesTable).where(eq(importProfilesTable.distributorId, detection.distributorId))
+    : [];
+
+  const effectiveMapping = (profile?.mapping ?? detection.mapping) as Record<string, string | null> | null;
+
+  let rowCountMatched = rowCountTotal;
+  if (effectiveMapping?.brand && sampleRows.length > 0) {
+    const brandMap = await buildBrandMap();
+    const matchRate = sampleRows.filter((r) => {
+      const raw = r[effectiveMapping.brand as string] ?? "";
+      return resolveCanonicalBrand(raw, brandMap) !== null;
+    }).length / sampleRows.length;
+    rowCountMatched = Math.round(rowCountTotal * matchRate);
+  }
+
+  res.json({
+    tempFileKey: null,
+    columns,
+    rows: sampleRows.slice(0, 50),
+    rowCountTotal,
+    rowCountMatched,
+    hasProfile: !!profile,
+    detectedDelimiter: null,
+    detectedDistributorId: detection.distributorId,
+    detectedDistributorName: detection.distributorName,
+    detectedMapping: profile ? null : detection.mapping,
+    profile: profile
+      ? {
+          id: profile.id,
+          distributorId: profile.distributorId,
+          sourceFormat: profile.sourceFormat,
+          delimiter: profile.delimiter ?? null,
+          headerRowIndex: profile.headerRowIndex,
+          mapping: profile.mapping,
+          createdAt: profile.createdAt.toISOString(),
+          updatedAt: profile.updatedAt.toISOString(),
+        }
+      : null,
+  });
+});
+
+// POST /uploads/commit-direct — commit from pre-parsed rows (no temp file, for large file uploads)
+router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" }), async (req, res): Promise<void> => {
+  const {
+    distributorId,
+    mapping,
+    rows,
+    snapshotDate,
+    filename = "upload",
+    rowCountTotal,
+    saveProfile = false,
+    sourceFormat = "txt",
+    delimiter,
+    headerRowIndex = 0,
+  } = req.body as {
+    distributorId: number;
+    mapping: Record<string, string | null>;
+    rows: Record<string, string>[];
+    snapshotDate?: string;
+    filename?: string;
+    rowCountTotal?: number;
+    saveProfile?: boolean;
+    sourceFormat?: string;
+    delimiter?: string | null;
+    headerRowIndex?: number;
+  };
+
+  if (!distributorId || !mapping || !Array.isArray(rows)) {
+    res.status(400).json({ error: "distributorId, mapping, and rows are required" });
+    return;
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  const effectiveSnapshotDate = snapshotDate ?? today;
+  const totalRows = rowCountTotal ?? rows.length;
+
+  const brandMap = await buildBrandMap();
+
+  const [uploadRecord] = await db
+    .insert(uploadsTable)
+    .values({
+      distributorId: Number(distributorId),
+      filename,
+      snapshotDate: effectiveSnapshotDate,
+      rowCountTotal: totalRows,
+      rowCountMatched: 0,
+      uploadedBy: req.session.userId,
+      status: "parsing",
+    })
+    .returning();
+
+  let committed = 0;
+
+  for (const row of rows) {
+    const rawVpn = row[mapping.vpn as string] ?? "";
+    const rawBrand = row[mapping.brand as string] ?? "";
+    const rawDescription = row[mapping.description as string] ?? "";
+    const rawPrice = row[mapping.sell_price as string] ?? "";
+    const rawSoh = row[mapping.soh as string] ?? "";
+    const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
+
+    if (!rawVpn.trim()) continue;
+
+    const canonicalBrand = resolveCanonicalBrand(rawBrand, brandMap);
+    if (!canonicalBrand) continue;
+
+    const vpnNormalized = normalizeVpn(rawVpn);
+    const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
+    const soh = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
+    const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
+
+    const existing = await db.select().from(productsTable).where(eq(productsTable.vpnNormalized, vpnNormalized)).limit(1);
+
+    let productId: number;
+    if (existing.length > 0) {
+      const p = existing[0];
+      await db.update(productsTable).set({ description: rawDescription || p.description, lastSeenAt: new Date() }).where(eq(productsTable.id, p.id));
+      productId = p.id;
+    } else {
+      const [newProduct] = await db.insert(productsTable).values({
+        vpnNormalized,
+        vpnDisplay: rawVpn.trim(),
+        brand: canonicalBrand,
+        description: rawDescription,
+      }).returning();
+      productId = newProduct.id;
+    }
+
+    await db.insert(stockSnapshotsTable).values({
+      uploadId: uploadRecord.id,
+      distributorId: Number(distributorId),
+      productId,
+      snapshotDate: effectiveSnapshotDate,
+      sellPrice: sellPrice != null ? String(sellPrice) : null,
+      soh,
+      soo: soo ?? null,
+    });
+
+    committed++;
+  }
+
+  await db.update(uploadsTable).set({ rowCountMatched: committed, status: "committed" }).where(eq(uploadsTable.id, uploadRecord.id));
+
+  const mappingIsValid = !!(mapping.vpn && mapping.brand && mapping.sell_price && mapping.soh);
+  if (saveProfile && mappingIsValid) {
+    const safeSourceFormat: "xlsx" | "txt" = sourceFormat === "xlsx" ? "xlsx" : "txt";
+    const delimitedFormat = safeSourceFormat === "xlsx" ? null : (delimiter ?? null);
+    await db
+      .insert(importProfilesTable)
+      .values({ distributorId: Number(distributorId), sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping })
+      .onConflictDoUpdate({
+        target: importProfilesTable.distributorId,
+        set: { sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping, updatedAt: new Date() },
+      });
+  }
+
+  res.status(201).json({
+    id: uploadRecord.id,
+    distributorId: Number(distributorId),
+    filename,
+    uploadedAt: uploadRecord.uploadedAt.toISOString(),
+    snapshotDate: effectiveSnapshotDate,
+    rowCountTotal: totalRows,
     rowCountMatched: committed,
     status: "committed",
   });

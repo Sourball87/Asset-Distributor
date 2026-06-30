@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useId, useEffect } from "react";
+import Papa from "papaparse";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -26,6 +27,8 @@ import { FileUp, CheckCircle2, AlertCircle, Loader2, X, LogIn } from "lucide-rea
 
 type FileStatus = "queued" | "parsing" | "ready" | "importing" | "done" | "error";
 
+const LARGE_FILE_THRESHOLD = 20 * 1024 * 1024; // 20 MB
+
 interface FileEntry {
   id: string;
   file: File;
@@ -33,6 +36,7 @@ interface FileEntry {
   error?: string;
   // parse result
   tempFileKey?: string;
+  clientRows?: Record<string, string>[]; // set when parsed client-side (large files)
   columns?: string[];
   mapping?: ColumnMapping;
   detectedDistributorId?: number | null;
@@ -87,7 +91,45 @@ async function apiFetch(url: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
-async function parseFile(file: File): Promise<ParsePreview> {
+// Parse a file client-side using Papa Parse (used for large files to avoid proxy limits).
+// Returns { columns, allRows } — allRows kept in memory for commit.
+function parseClientSide(file: File): Promise<{ columns: string[]; allRows: Record<string, string>[] }> {
+  return new Promise((resolve, reject) => {
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: false,
+      complete(results) {
+        const columns = (results.meta.fields ?? []) as string[];
+        resolve({ columns, allRows: results.data });
+      },
+      error(err) {
+        reject(new Error(err.message));
+      },
+    });
+  });
+}
+
+// Returns ParsePreview AND (for large files) the clientRows stored in the entry
+async function parseFile(file: File): Promise<ParsePreview & { clientRows?: Record<string, string>[] }> {
+  // Large files: parse client-side, then POST only column headers + 50 sample rows for detection
+  if (file.size > LARGE_FILE_THRESHOLD) {
+    const { columns, allRows } = await parseClientSide(file);
+    const sampleRows = allRows.slice(0, 200);
+    const res = await apiFetch("/api/uploads/detect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns, sampleRows, rowCountTotal: allRows.length }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error ?? `Parse error (HTTP ${res.status})`);
+    }
+    const preview = await res.json() as ParsePreview;
+    return { ...preview, clientRows: allRows };
+  }
+
+  // Small files: existing server-side parse
   const fd = new FormData();
   fd.append("file", file);
   const res = await apiFetch("/api/uploads/parse", { method: "POST", body: fd });
@@ -100,9 +142,45 @@ async function parseFile(file: File): Promise<ParsePreview> {
 
 async function commitFile(entry: FileEntry, snapshotDate: string): Promise<{ rowCountMatched: number }> {
   const distributorId = entry.overrideDistributorId ?? entry.detectedDistributorId;
-  if (!distributorId || !entry.tempFileKey || !entry.mapping) {
+  if (!distributorId || !entry.mapping) {
     throw new Error("Missing required fields for commit");
   }
+
+  // Large files: send rows directly (no temp file on server)
+  if (entry.clientRows) {
+    const mapping = entry.mapping;
+    // Only include the 6 mapped columns to minimise payload size
+    const mappedKeys = [mapping.vpn, mapping.brand, mapping.description, mapping.sell_price, mapping.soh, mapping.soo].filter(Boolean) as string[];
+    const rows = entry.clientRows.map((r) => {
+      const out: Record<string, string> = {};
+      for (const k of mappedKeys) out[k] = r[k] ?? "";
+      return out;
+    });
+    const body = {
+      distributorId,
+      mapping,
+      rows,
+      rowCountTotal: entry.rowCountTotal,
+      filename: entry.file.name,
+      sourceFormat: fileSourceFormat(entry.file.name),
+      snapshotDate,
+      saveProfile: !entry.hasProfile,
+    };
+    const res = await apiFetch("/api/uploads/commit-direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error ?? `Commit error (HTTP ${res.status})`);
+    }
+    const data = await res.json();
+    return { rowCountMatched: data.rowCountMatched };
+  }
+
+  // Small files: existing server-side commit via tempFileKey
+  if (!entry.tempFileKey) throw new Error("Missing tempFileKey for commit");
   const body = {
     distributorId,
     tempFileKey: entry.tempFileKey,
@@ -183,7 +261,8 @@ export default function ImportPage() {
 
       updateFile(entry.id, {
         status: "ready",
-        tempFileKey: preview.tempFileKey,
+        tempFileKey: preview.tempFileKey ?? undefined,
+        clientRows: preview.clientRows,
         columns: preview.columns,
         mapping,
         detectedDistributorId: preview.detectedDistributorId ?? null,
