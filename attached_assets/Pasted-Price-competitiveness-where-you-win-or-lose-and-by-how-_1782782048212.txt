@@ -1,0 +1,20 @@
+Price competitiveness (where you win or lose, and by how much)
+
+Win rate: of the SKUs that actually have a competitor benchmark, what % is Dicker the cheapest on. One headline number per brand that PMs instantly get.
+Not just the count of where you're dearer, but by how much: average and median gap to the cheapest competitor, in both dollars and percent. "Dearer on 140 SKUs" matters far less if it's all sub-1%.
+Top reprice targets: the 10–20 SKUs where you're most overpriced versus an in-stock competitor, ranked by gap. This is the most actionable single output — it's a to-do list, not a statistic.
+The inverse, margin headroom: SKUs where you're well below every competitor and could lift price without losing the win.
+Who's beating you: per competitor, how often each undercuts you. Tells you whether Ingram or Leader is the real price threat on a given brand.
+Aggregate exposure: summed dollar gap across everything you're dearer on, ideally weighted by your stock on hand, so a $300 gap on a SKU you hold 150 of outranks a $300 gap on one you don't stock.
+
+Stock position (availability as a weapon)
+
+Your out-of-stocks that a competitor can fill (your point) — and the sharper version: how many of those a competitor has in stock right now versus merely lists. That's live lost-sale risk.
+The reverse, and arguably more valuable: SKUs where you have stock and every competitor is out. These are availability wins to push to resellers — you can hold price and still take the order.
+Total SOH per brand, yours versus summed competitor SOH, plus a count of your low-stock lines (say under 5) that competitors are deep on.
+
+Range and coverage (what to add or drop)
+
+Exclusive lines: SKUs you carry that no competitor lists — no price pressure, often your best margin.
+Range gaps: SKUs competitors carry that you don't (you've already got ~4,600 of these) — a sourcing shortlist, best filtered to ones with real competitor stock.
+Benchmark coverage per brand: what share of your SKUs even have a competitor to compare against. This is the honesty check — it surfaces your blind spots (Netgear and ASUS are barely benchmarked, Synnex covers almost nothing), so nobody reads "we win 90%" off a brand where only 8 SKUs matched.

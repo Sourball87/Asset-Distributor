@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload } from "lucide-react";
+import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -29,6 +29,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/comparison", label: "Comparison", icon: Grid },
+    { href: "/insights", label: "Insights", icon: TrendingUp },
     { href: "/import", label: "Import", icon: Upload },
   ];
 

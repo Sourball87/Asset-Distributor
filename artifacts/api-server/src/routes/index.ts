@@ -7,6 +7,7 @@ import dashboardRouter from "./dashboard";
 import comparisonRouter from "./comparison";
 import compareFileRouter from "./compare-file";
 import uploadsRouter from "./uploads";
+import insightsRouter from "./insights";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(dashboardRouter);
 router.use(comparisonRouter);
 router.use(compareFileRouter);
 router.use(uploadsRouter);
+router.use(insightsRouter);
 
 export default router;
