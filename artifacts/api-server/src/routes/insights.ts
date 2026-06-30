@@ -208,23 +208,17 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
     ),
     soh_totals AS (
       SELECT
-        SUM(CASE WHEN d.is_baseline THEN COALESCE(ls.soh, 0) END)::int AS dicker_total_soh,
-        json_agg(
-          CASE WHEN NOT d.is_baseline
-            THEN json_build_object('id', d.id, 'name', d.name, 'total', COALESCE(comp_soh.total, 0))
-          END
-        ) FILTER (WHERE NOT d.is_baseline) AS comp_soh_totals
-      FROM distributors d
-      LEFT JOIN LATERAL (
-        SELECT SUM(COALESCE(ls.soh, 0))::int AS total
-        FROM latest_ss ls
-        WHERE ls.distributor_id = d.id
-      ) comp_soh ON true
-      LEFT JOIN LATERAL (
-        SELECT COALESCE(SUM(ls.soh), 0) AS soh
-        FROM latest_ss ls
-        WHERE ls.distributor_id = d.id AND d.is_baseline
-      ) ls ON true
+        (SELECT COALESCE(SUM(ls2.soh), 0)
+         FROM latest_ss ls2
+         JOIN distributors d2 ON d2.id = ls2.distributor_id AND d2.is_baseline = true
+        ) AS dicker_total_soh,
+        (SELECT json_agg(json_build_object(
+                  'id',    d3.id,
+                  'name',  d3.name,
+                  'total', COALESCE((SELECT SUM(ls3.soh) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id), 0)
+                ))
+         FROM distributors d3 WHERE NOT d3.is_baseline
+        ) AS comp_soh_totals
     ),
     low_stock AS (
       SELECT
