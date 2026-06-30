@@ -29,6 +29,7 @@ const SEED_BRANDS = [
   { canonicalName: "POWERSHIELD", aliases: ["Powershield", "POWER SHIELD"] },
   { canonicalName: "KENSINGTON",  aliases: ["Kensington", "KENSINGTON COMPUTER PRODUCTS"] },
   { canonicalName: "LG",          aliases: ["Lg", "LG ELECTRONICS"] },
+  { canonicalName: "UBIQUITI",    aliases: ["Ubiquiti", "Ubiquiti Networks", "UBIQUITI NETWORKS", "Ubiquiti Inc"] },
 ];
 
 export async function seedIfEmpty(): Promise<void> {

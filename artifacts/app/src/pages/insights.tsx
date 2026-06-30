@@ -33,6 +33,13 @@ interface HeadroomLine {
   dicker_soh: number;
 }
 
+interface CompSohEntry {
+  id: number;
+  name: string;
+  total_soh: number;
+  total_soo: number | null;
+}
+
 interface CompUndercut {
   distributor_id: number;
   disti_name: string;
@@ -44,7 +51,7 @@ interface LostSaleLine {
   vpn_display: string;
   description: string;
   dicker_soh: number;
-  competitors_in_stock: Array<{ name: string; soh: number }>;
+  competitors_in_stock: Array<{ name: string; soh: number; soo: number | null }>;
 }
 
 interface AvailWinLine {
@@ -113,7 +120,7 @@ interface InsightsData {
   stockPosition: {
     lostSales: { count: number; lines: LostSaleLine[] };
     availabilityWins: { count: number; lines: AvailWinLine[] };
-    sohTotals: { dicker_total_soh: number; comp_soh_totals: Array<{ id: number; name: string; total: number }> };
+    sohTotals: { dicker_total_soh: number; comp_soh_totals: CompSohEntry[] };
     lowStockLines: LowStockLine[];
   };
   rangeAndCoverage: {
@@ -230,21 +237,6 @@ function PriceTab({ data }: { data: InsightsData }) {
         </div>
       </div>
 
-      {/* Gap detail */}
-      {pc.dearer.count > 0 && (
-        <div>
-          <SectionHeader
-            title="Gap detail (where dearer)"
-            sub="Measured against cheapest competitor price, regardless of stock"
-          />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Avg gap $" value={fmt$(pc.dearer.avgGapDollars)} accent="neutral" />
-            <StatCard label="Median gap $" value={fmt$(pc.dearer.medianGapDollars)} accent="neutral" />
-            <StatCard label="Avg gap %" value={fmtPct(pc.dearer.avgGapPct)} accent="neutral" />
-            <StatCard label="Median gap %" value={fmtPct(pc.dearer.medianGapPct)} accent="neutral" />
-          </div>
-        </div>
-      )}
 
       {/* Reprice targets */}
       {pc.repriceTargets.length > 0 && (
@@ -382,13 +374,19 @@ function StockTab({ data }: { data: InsightsData }) {
 
   return (
     <div className="space-y-6">
-      {/* SOH totals */}
+      {/* SOH + SOO totals */}
       <div>
-        <SectionHeader title="Total stock on hand" sub="Summed across all SKUs for this brand" />
+        <SectionHeader title="Total stock on hand / on order" sub="Summed across all SKUs for this brand" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label={`${baseline.name} SOH`} value={fmtN(dickerSoh)} accent="neutral" />
           {(sp.sohTotals?.comp_soh_totals ?? []).map((c) => (
-            <StatCard key={c.id} label={`${c.name} SOH`} value={fmtN(c.total)} accent="neutral" />
+            <StatCard
+              key={c.id}
+              label={`${c.name} SOH`}
+              value={fmtN(c.total_soh)}
+              sub={c.total_soo != null && c.total_soo > 0 ? `SOO: ${fmtN(c.total_soo)}` : undefined}
+              accent="neutral"
+            />
           ))}
         </div>
       </div>
@@ -419,6 +417,9 @@ function StockTab({ data }: { data: InsightsData }) {
                         <span key={c.name} className="inline-flex items-center gap-1 mr-3 text-muted-foreground">
                           <span className="font-medium text-foreground">{c.name}</span>
                           <span className="font-mono">{fmtN(c.soh)}</span>
+                          {c.soo != null && c.soo > 0 && (
+                            <span className="font-mono text-xs text-muted-foreground/70">(+{fmtN(c.soo)} OO)</span>
+                          )}
                         </span>
                       ))}
                     </td>

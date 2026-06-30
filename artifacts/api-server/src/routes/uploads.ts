@@ -278,7 +278,9 @@ async function commitRowsBatched(
     const rawSoh = row[mapping.soh as string] ?? "";
     const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
     const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
-    const soh = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
+    const sohRaw = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
+    // 999999999 is Dicker Data's placeholder for digital/non-physical items — treat as 0 (no stock)
+    const soh = sohRaw === 999999999 ? 0 : sohRaw;
     const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
 
     parsed.push({

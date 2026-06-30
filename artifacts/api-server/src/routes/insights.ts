@@ -181,7 +181,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       SELECT
         p.vpn_display, p.description,
         COALESCE(dd.soh, 0) AS dicker_soh,
-        json_agg(json_build_object('name', c.disti_name, 'soh', c.soh)
+        json_agg(json_build_object('name', c.disti_name, 'soh', c.soh, 'soo', c.soo)
           ORDER BY c.soh DESC NULLS LAST) AS competitors_in_stock,
         SUM(COALESCE(c.soh, 0)) AS total_comp_soh
       FROM dicker dd
@@ -213,9 +213,10 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
          JOIN distributors d2 ON d2.id = ls2.distributor_id AND d2.is_baseline = true
         ) AS dicker_total_soh,
         (SELECT json_agg(json_build_object(
-                  'id',    d3.id,
-                  'name',  d3.name,
-                  'total', COALESCE((SELECT SUM(ls3.soh) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id), 0)
+                  'id',       d3.id,
+                  'name',     d3.name,
+                  'total_soh', COALESCE((SELECT SUM(ls3.soh) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id), 0),
+                  'total_soo', (SELECT SUM(ls3.soo) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id)
                 ))
          FROM distributors d3 WHERE NOT d3.is_baseline
         ) AS comp_soh_totals
