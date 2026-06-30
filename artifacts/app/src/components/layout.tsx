@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp } from "lucide-react";
+import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp, FileSliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -36,6 +36,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const settingsItems = [
     { href: "/settings/distributors", label: "Distributors", icon: Building2 },
     { href: "/settings/brands", label: "Brands", icon: Package },
+    { href: "/settings/import-profiles", label: "Import Profiles", icon: FileSliders },
   ];
 
   return (

@@ -14,6 +14,7 @@ import Insights from "@/pages/insights";
 import ImportPage from "@/pages/import";
 import Distributors from "@/pages/settings/distributors";
 import Brands from "@/pages/settings/brands";
+import ImportProfiles from "@/pages/settings/import-profiles";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -87,6 +88,14 @@ function Router() {
         {() => (
           <Layout>
             <ProtectedRoute component={Brands} />
+          </Layout>
+        )}
+      </Route>
+
+      <Route path="/settings/import-profiles">
+        {() => (
+          <Layout>
+            <ProtectedRoute component={ImportProfiles} />
           </Layout>
         )}
       </Route>
