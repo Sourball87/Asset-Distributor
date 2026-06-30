@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, integer, numeric, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, timestamp, integer, numeric, date, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { uploadsTable } from "./uploads";
@@ -15,7 +15,13 @@ export const stockSnapshotsTable = pgTable("stock_snapshots", {
   soh: integer("soh"),
   soo: integer("soo"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index("idx_ss_distributor_id").on(t.distributorId),
+  index("idx_ss_product_id").on(t.productId),
+  index("idx_ss_product_distributor").on(t.productId, t.distributorId),
+  index("idx_ss_upload_id").on(t.uploadId),
+  index("idx_ss_snapshot_date").on(t.snapshotDate),
+]);
 
 export const insertStockSnapshotSchema = createInsertSchema(stockSnapshotsTable).omit({ id: true, createdAt: true });
 export type InsertStockSnapshot = z.infer<typeof insertStockSnapshotSchema>;
