@@ -77,6 +77,32 @@ const FINGERPRINTS: DistributorFingerprint[] = [
       soo: null,
     },
   },
+  {
+    // MMT: "Man.Code/SKU" is the manufacturer part number (VPN)
+    namePattern: "mmt",
+    signatures: ["Man.Code/SKU", "Your Buy Ex. GST", "Available (Qty)", "MMT Code"],
+    mapping: {
+      vpn: "Man.Code/SKU",
+      brand: "Manufacturer",
+      description: "Description",
+      sell_price: "Your Buy Ex. GST",
+      soh: "Available (Qty)",
+      soo: null,
+    },
+  },
+  {
+    // Bluechip: "SupplierPartNumber" is the manufacturer part number (VPN)
+    namePattern: "bluechip",
+    signatures: ["SupplierPartNumber", "Cost_EX_GST", "NSW_Qty", "VIC_Qty"],
+    mapping: {
+      vpn: "SupplierPartNumber",
+      brand: "Manufacturer",
+      description: "Description",
+      sell_price: "Cost_EX_GST",
+      soh: "Qty",
+      soo: null,
+    },
+  },
 ];
 
 async function detectDistributor(columns: string[]): Promise<{
