@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
-import { eq, desc, inArray, sql } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
@@ -305,7 +305,8 @@ async function commitRowsBatched(
   }
   const uniqueProducts = [...productsByVpn.values()];
 
-  // 3. Batch upsert all products — on conflict keep existing brand, update lastSeenAt + description if blank
+  // 3. Batch insert all products — skip existing ones (first insert wins for brand/description)
+  // onConflictDoNothing is deadlock-safe for concurrent imports with overlapping VPNs
   for (let i = 0; i < uniqueProducts.length; i += DB_CHUNK) {
     const chunk = uniqueProducts.slice(i, i + DB_CHUNK);
     await db.insert(productsTable)
@@ -315,13 +316,7 @@ async function commitRowsBatched(
         brand: r.canonicalBrand,
         description: r.description,
       })))
-      .onConflictDoUpdate({
-        target: productsTable.vpnNormalized,
-        set: {
-          description: sql`CASE WHEN ${productsTable.description} = '' THEN EXCLUDED.description ELSE ${productsTable.description} END`,
-          lastSeenAt: new Date(),
-        },
-      });
+      .onConflictDoNothing({ target: productsTable.vpnNormalized });
   }
 
   // 4. Fetch all product IDs in one query
