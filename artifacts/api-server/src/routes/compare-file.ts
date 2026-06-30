@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, distributorsTable, productsTable, stockSnapshotsTable, uploadsTable } from "@workspace/db";
+import { db, distributorsTable, productsTable, uploadsTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import ExcelJS from "exceljs";
@@ -29,20 +29,54 @@ function fnt(opts: Partial<ExcelJS.Font> = {}): Partial<ExcelJS.Font> {
 function thin(argb: string): Partial<ExcelJS.Border> {
   return { style: "thin", color: { argb } };
 }
+// Convert 1-based column number to Excel letter(s)
+function colLetter(n: number): string {
+  let s = "";
+  while (n > 0) {
+    n--;
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26);
+  }
+  return s;
+}
 
 router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
-  const brandsParam = (req.query.brands as string | undefined) ?? "";
-  const selectedBrands = brandsParam
-    .split(",")
-    .map((b) => b.trim().toUpperCase())
-    .filter(Boolean);
+  const brandsParam      = (req.query.brands      as string | undefined) ?? "";
+  const distParam        = (req.query.distributors as string | undefined) ?? "";
+
+  const selectedBrands = brandsParam.split(",").map((b) => b.trim().toUpperCase()).filter(Boolean);
+  const selectedDistIds = distParam.split(",").map((s) => parseInt(s.trim())).filter((n) => !isNaN(n));
 
   // ── 1. Distributors ─────────────────────────────────────────
-  const distributors = await db.select().from(distributorsTable).orderBy(distributorsTable.id);
-  const dickerDist = distributors.find((d) => d.isBaseline);
-  const ingramDist = distributors.find((d) => d.name.toLowerCase().includes("ingram"));
-  const synnexDist = distributors.find((d) => d.name.toLowerCase().includes("synnex"));
-  const leaderDist = distributors.find((d) => d.name.toLowerCase().includes("leader"));
+  const allDists   = await db.select().from(distributorsTable).orderBy(distributorsTable.id);
+  const dickerDist = allDists.find((d) => d.isBaseline);
+  const allCompetitors = allDists.filter((d) => !d.isBaseline);
+
+  // Filter to selected competitors (or all if none specified)
+  const competitors = selectedDistIds.length > 0
+    ? allCompetitors.filter((d) => selectedDistIds.includes(d.id))
+    : allCompetitors;
+
+  // DATA sheet column layout (1-based):
+  //   1=key, 2=brand, 3=desc, 4=dicker_soh, 5=dicker_price,
+  //   then per competitor (3 cols each): soh, price, oo
+  //   competitor i (0-based): colSoh=6+3i, colPrice=7+3i, colOo=8+3i
+  interface CompetitorMeta {
+    id: number;
+    name: string;
+    label: string;
+    colSoh: number;
+    colPrice: number;
+    colOo: number;
+  }
+  const competitorMeta: CompetitorMeta[] = competitors.map((d, i) => ({
+    id:       d.id,
+    name:     d.name,
+    label:    `▸ ${d.name}`,
+    colSoh:   6 + 3 * i,
+    colPrice: 7 + 3 * i,
+    colOo:    8 + 3 * i,
+  }));
 
   // ── 2. Freshness dates ───────────────────────────────────────
   type FreshnessRow = { distributor_id: number; last_date: string };
@@ -65,7 +99,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     products = products.filter((p) => selectedBrands.includes(p.brand));
   }
 
-  // ── 4. Latest snapshots (DISTINCT ON) ───────────────────────
+  // ── 4. Latest snapshots (all distributors) ───────────────────
   type SnapRow = {
     product_id: number; distributor_id: number;
     sell_price: string | null; soh: number | null; soo: number | null;
@@ -81,86 +115,66 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     snapMap.set(`${r.product_id}:${r.distributor_id}`, r);
   }
 
-  // ── 5. Build data rows ───────────────────────────────────────
-  interface DataRow {
-    key: string; brand: string; desc: string;
-    dicker_soh: number | null; dicker_price: number | null;
-    ingram_soh: number | null; ingram_price: number | null; ingram_oo: number | null;
-    synnex_soh: number | null; synnex_price: number | null;
-    leader_soh: number | null; leader_price: number | null;
-  }
-
-  const dataRows: DataRow[] = products.map((p) => {
-    const dkSnap = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
-    const igSnap = ingramDist ? snapMap.get(`${p.id}:${ingramDist.id}`) : undefined;
-    const sxSnap = synnexDist ? snapMap.get(`${p.id}:${synnexDist.id}`) : undefined;
-    const ldSnap = leaderDist ? snapMap.get(`${p.id}:${leaderDist.id}`) : undefined;
-
-    const rawSoh = dkSnap?.soh ?? null;
-    const dickerSoh = rawSoh === DICKER_SOH_SENTINEL ? null : rawSoh;
-
-    return {
-      key:          p.vpnNormalized,
-      brand:        p.brand,
-      desc:         p.description,
-      dicker_soh:   dickerSoh,
-      dicker_price: dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null,
-      ingram_soh:   igSnap?.soh ?? null,
-      ingram_price: igSnap?.sell_price != null ? parseFloat(igSnap.sell_price) : null,
-      ingram_oo:    igSnap?.soo ?? null,
-      synnex_soh:   sxSnap?.soh ?? null,
-      synnex_price: sxSnap?.sell_price != null ? parseFloat(sxSnap.sell_price) : null,
-      leader_soh:   ldSnap?.soh ?? null,
-      leader_price: ldSnap?.sell_price != null ? parseFloat(ldSnap.sell_price) : null,
-    };
-  });
-
-  // Sort: brand asc, dicker_soh desc (nulls last)
-  dataRows.sort((a, b) => {
-    if (a.brand < b.brand) return -1;
-    if (a.brand > b.brand) return 1;
-    return (b.dicker_soh ?? -1) - (a.dicker_soh ?? -1);
-  });
-
-  // ── 6. Build workbook ────────────────────────────────────────
+  // ── 5. Build workbook ────────────────────────────────────────
   const wb = new ExcelJS.Workbook();
   wb.creator = "DistiBench";
 
-  // Add LOOKUP first so it opens as the active sheet
   const ws     = wb.addWorksheet("LOOKUP");
   const dataWs = wb.addWorksheet("DATA", { state: "veryHidden" });
 
   // ─── DATA sheet ────────────────────────────────────────────
-  dataWs.addRow(["key","brand","desc","dicker_soh","dicker_price","ingram_soh","ingram_price","ingram_oo","synnex_soh","synnex_price","leader_soh","leader_price"]);
-  for (const r of dataRows) {
-    dataWs.addRow([
-      r.key, r.brand, r.desc,
-      r.dicker_soh, r.dicker_price,
-      r.ingram_soh, r.ingram_price, r.ingram_oo,
-      r.synnex_soh, r.synnex_price,
-      r.leader_soh, r.leader_price,
-    ]);
+  const dataHeader = [
+    "key","brand","desc","dicker_soh","dicker_price",
+    ...competitorMeta.flatMap((c) => [`${c.name}_soh`, `${c.name}_price`, `${c.name}_oo`]),
+  ];
+  dataWs.addRow(dataHeader);
+
+  // Sort products: brand asc, dicker_soh desc (nulls last)
+  const sortedProducts = [...products].sort((a, b) => {
+    if (a.brand < b.brand) return -1;
+    if (a.brand > b.brand) return 1;
+    const aSnap = dickerDist ? snapMap.get(`${a.id}:${dickerDist.id}`) : undefined;
+    const bSnap = dickerDist ? snapMap.get(`${b.id}:${dickerDist.id}`) : undefined;
+    const aSOH  = (aSnap?.soh === DICKER_SOH_SENTINEL ? null : (aSnap?.soh ?? null)) ?? -1;
+    const bSOH  = (bSnap?.soh === DICKER_SOH_SENTINEL ? null : (bSnap?.soh ?? null)) ?? -1;
+    return bSOH - aSOH;
+  });
+
+  for (const p of sortedProducts) {
+    const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
+    const rawSoh  = dkSnap?.soh ?? null;
+    const dkSOH   = rawSoh === DICKER_SOH_SENTINEL ? null : rawSoh;
+    const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+
+    const compCols = competitorMeta.flatMap((c) => {
+      const snap = snapMap.get(`${p.id}:${c.id}`);
+      return [
+        snap?.soh   ?? null,
+        snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
+        snap?.soo   ?? null,
+      ];
+    });
+
+    dataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
   }
 
   // ─── LOOKUP sheet ──────────────────────────────────────────
-  // New layout: each block is 4 rows tall.
-  // Col A (merged, tall) = yellow input cell where user types the VPN.
-  // Cols B-E = Dicker + competitor rows side-by-side within those 4 rows.
-  // No separate input list or results section — everything is in-line.
+  // Each block = 1 Dicker row + 1 row per selected competitor.
+  // Column A (merged for full block height) = yellow empty input cell.
+  // Columns B–E = side-by-side results.
 
-  const R     = 50;          // number of lookup blocks
-  const START = 12;          // first block starts at row 12
-  const HDR   = START - 1;  // column header row = 11
-  const LAST  = START + 4 * R - 1;
+  const R         = 100;
+  const blockSize = 1 + competitorMeta.length; // rows per block
+  const START     = 12;
+  const HDR       = START - 1; // block column header = row 11
+  const LAST      = START + blockSize * R - 1;
 
-  // Column widths (per spec)
   ws.getColumn("A").width = 26;
   ws.getColumn("B").width = 56;
   ws.getColumn("C").width = 9;
   ws.getColumn("D").width = 12;
   ws.getColumn("E").width = 10;
 
-  // Freeze rows 1–11 (freshness strip + block header stay visible while scrolling)
   ws.views = [{ showGridLines: false, state: "frozen", xSplit: 0, ySplit: HDR }];
 
   // Row 1 — title
@@ -187,12 +201,10 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     c.alignment = { horizontal: "center", vertical: "middle" };
   });
 
-  // Rows 5–8 — per-distributor freshness data
+  // Rows 5..(4+freshnessLines.length) — per-distributor freshness
   const freshnessLines = [
     { label: "Dicker Data", dist: dickerDist },
-    { label: "Ingram",      dist: ingramDist },
-    { label: "Synnex",      dist: synnexDist },
-    { label: "Leader",      dist: leaderDist },
+    ...competitors.map((d) => ({ label: d.name, dist: d })),
   ];
   freshnessLines.forEach(({ label, dist }, idx) => {
     const rn = 5 + idx;
@@ -200,7 +212,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     aCell.value = label;
     aCell.font  = fnt({ bold: true, color: { argb: DARK } });
 
-    const bCell = ws.getCell(rn, 2);
+    const bCell   = ws.getCell(rn, 2);
     const lastDate = dist ? freshnessMap.get(dist.id) : null;
     if (lastDate) {
       bCell.value  = new Date(lastDate + "T00:00:00");
@@ -219,9 +231,9 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     dCell.font  = fnt({ bold: true });
   });
 
-  // Conditional formatting — freshness status
+  const freshnessEnd = 4 + freshnessLines.length;
   ws.addConditionalFormatting({
-    ref: "D5:D8",
+    ref: `D5:D${freshnessEnd}`,
     rules: [
       { type: "expression", priority: 1, formulae: [`$C5>3`],             style: { font: { bold: true, color: { argb: RED_C   } } } },
       { type: "expression", priority: 2, formulae: [`AND($C5>1,$C5<=3)`], style: { font: { bold: true, color: { argb: AMBER_C } } } },
@@ -245,129 +257,105 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     c.alignment = { horizontal: i <= 1 ? "left" : "center", vertical: "middle", indent: i <= 1 ? 1 : 0 };
   });
 
-  // ─── 4-row blocks ──────────────────────────────────────────
-  // Block k (0-based): base = START + 4*k
-  //   A{base}:A{base+3} — merged, yellow, user types VPN here
-  //   B{base}  / C{base}  / D{base}          — Dicker row (description / SOH / price)
-  //   B{base+1}/ C{base+1}/ D{base+1}/ E{base+1} — Ingram  row
-  //   B{base+2}/ C{base+2}/ D{base+2}        — Synnex  row
-  //   B{base+3}/ C{base+3}/ D{base+3}        — Leader  row
-  //   Thin BLK_BORDER top border across A–E on the Dicker row.
-
-  const thinIN  = thin(IN_BORDER);
-  const topBlk  = thin(BLK_BORDER);
+  // ─── 4-row (or blockSize-row) blocks ────────────────────────
+  const thinIN = thin(IN_BORDER);
+  const topBlk = thin(BLK_BORDER);
 
   for (let k = 0; k < R; k++) {
-    const base  = START + 4 * k;
-    const ic    = `$A$${base}`;   // absolute ref to the merged input cell
-    const norm  = `UPPER(SUBSTITUTE(TRIM(${ic})," ",""))`;
-    const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
+    const base = START + blockSize * k;
+    const ic   = `$A$${base}`;
+    const norm = `UPPER(SUBSTITUTE(TRIM(${ic})," ",""))`;
+    const mf   = `MATCH(${norm},DATA!$A:$A,0)`;
 
-    // Merge A{base}:A{base+3} — tall yellow input cell
-    ws.mergeCells(base, 1, base + 3, 1);
-    const inputCell      = ws.getCell(base, 1);
-    inputCell.fill       = solid(INFILL);
-    inputCell.font       = fnt({ bold: true, color: { argb: DARK } });
-    inputCell.alignment  = { vertical: "middle", wrapText: false };
-    inputCell.border     = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
+    // Merged tall input cell spanning the full block
+    ws.mergeCells(base, 1, base + blockSize - 1, 1);
+    const inputCell     = ws.getCell(base, 1);
+    inputCell.fill      = solid(INFILL);
+    inputCell.font      = fnt({ bold: true, color: { argb: DARK } });
+    inputCell.alignment = { vertical: "middle", wrapText: false };
+    inputCell.border    = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
 
-    // Top separator border on entire Dicker row
+    // Thin separator across B–E on the Dicker (top) row
     const brkBorder = { top: topBlk };
     ws.getCell(base, 2).border = brkBorder;
     ws.getCell(base, 3).border = brkBorder;
     ws.getCell(base, 4).border = brkBorder;
     ws.getCell(base, 5).border = brkBorder;
 
-    // Dicker row — B, C, D (row = base)
+    // Dicker row
+    const dkDescCol  = colLetter(3);  // C in DATA
+    const dkSohCol   = colLetter(4);  // D
+    const dkPriceCol = colLetter(5);  // E
+
     const bD = ws.getCell(base, 2);
-    bD.value  = { formula: `IF(${ic}="","",IFERROR(INDEX(DATA!$C:$C,${mf}),"— part not found —"))` };
+    bD.value  = { formula: `IF(${ic}="","",IFERROR(INDEX(DATA!$${dkDescCol}:$${dkDescCol},${mf}),"— part not found —"))` };
     bD.font   = fnt({ bold: true, color: { argb: DARK } });
 
     const cD = ws.getCell(base, 3);
-    cD.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base}),INDEX(DATA!$D:$D,${mf}),""))` };
+    cD.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base}),INDEX(DATA!$${dkSohCol}:$${dkSohCol},${mf}),""))` };
     cD.font      = fnt({ bold: true, color: { argb: DARK } });
     cD.alignment = { horizontal: "center" };
 
     const dD = ws.getCell(base, 4);
-    dD.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$E:$E,${mf})=0,"not stocked",INDEX(DATA!$E:$E,${mf})),"not stocked"))` };
+    dD.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$${dkPriceCol}:$${dkPriceCol},${mf})=0,"not stocked",INDEX(DATA!$${dkPriceCol}:$${dkPriceCol},${mf})),"not stocked"))` };
     dD.font      = fnt({ bold: true, color: { argb: DARK } });
     dD.alignment = { horizontal: "center" };
     dD.numFmt    = "$#,##0.00";
 
-    // Ingram row — B, C, D, E (row = base+1)
-    const bI = ws.getCell(base + 1, 2);
-    bI.value     = { formula: `IF(${ic}="","","▸ Ingram")` };
-    bI.font      = fnt({ color: { argb: TEAL } });
-    bI.alignment = { horizontal: "right" };
+    // Competitor rows
+    competitorMeta.forEach((c, ci) => {
+      const row     = base + 1 + ci;
+      const sohCol   = colLetter(c.colSoh);
+      const priceCol = colLetter(c.colPrice);
+      const ooCol    = colLetter(c.colOo);
 
-    const cI = ws.getCell(base + 1, 3);
-    cI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$F:$F,${mf}),""))` };
-    cI.alignment = { horizontal: "center" };
+      const bC = ws.getCell(row, 2);
+      bC.value     = { formula: `IF(${ic}="","","${c.label}")` };
+      bC.font      = fnt({ color: { argb: TEAL } });
+      bC.alignment = { horizontal: "right" };
 
-    const dI = ws.getCell(base + 1, 4);
-    dI.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$G:$G,${mf})=0,"not listed",INDEX(DATA!$G:$G,${mf})),"not listed"))` };
-    dI.alignment = { horizontal: "center" };
-    dI.numFmt    = "$#,##0.00";
+      const cC = ws.getCell(row, 3);
+      cC.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${row}),INDEX(DATA!$${sohCol}:$${sohCol},${mf}),""))` };
+      cC.alignment = { horizontal: "center" };
 
-    const eI = ws.getCell(base + 1, 5);
-    eI.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 1}),INDEX(DATA!$H:$H,${mf}),""))` };
-    eI.alignment = { horizontal: "center" };
+      const dC = ws.getCell(row, 4);
+      dC.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$${priceCol}:$${priceCol},${mf})=0,"not listed",INDEX(DATA!$${priceCol}:$${priceCol},${mf})),"not listed"))` };
+      dC.alignment = { horizontal: "center" };
+      dC.numFmt    = "$#,##0.00";
 
-    // Synnex row — B, C, D (row = base+2)
-    const bS = ws.getCell(base + 2, 2);
-    bS.value     = { formula: `IF(${ic}="","","▸ Synnex")` };
-    bS.font      = fnt({ color: { argb: TEAL } });
-    bS.alignment = { horizontal: "right" };
-
-    const cS = ws.getCell(base + 2, 3);
-    cS.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 2}),INDEX(DATA!$I:$I,${mf}),""))` };
-    cS.alignment = { horizontal: "center" };
-
-    const dS = ws.getCell(base + 2, 4);
-    dS.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$J:$J,${mf})=0,"not listed",INDEX(DATA!$J:$J,${mf})),"not listed"))` };
-    dS.alignment = { horizontal: "center" };
-    dS.numFmt    = "$#,##0.00";
-
-    // Leader row — B, C, D (row = base+3)
-    const bL = ws.getCell(base + 3, 2);
-    bL.value     = { formula: `IF(${ic}="","","▸ Leader")` };
-    bL.font      = fnt({ color: { argb: TEAL } });
-    bL.alignment = { horizontal: "right" };
-
-    const cL = ws.getCell(base + 3, 3);
-    cL.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base + 3}),INDEX(DATA!$K:$K,${mf}),""))` };
-    cL.alignment = { horizontal: "center" };
-
-    const dL = ws.getCell(base + 3, 4);
-    dL.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$L:$L,${mf})=0,"not listed",INDEX(DATA!$L:$L,${mf})),"not listed"))` };
-    dL.alignment = { horizontal: "center" };
-    dL.numFmt    = "$#,##0.00";
+      const eC = ws.getCell(row, 5);
+      eC.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${row}),INDEX(DATA!$${ooCol}:$${ooCol},${mf}),""))` };
+      eC.alignment = { horizontal: "center" };
+    });
   }
 
   // ─── Price conditional formatting ─────────────────────────
-  // Applied over D{START}:D{LAST}.
-  // For each row r, the Dicker price for its block is at D{START + 4*INT((r-START)/4)}.
-  // Competitor rows satisfy MOD(r-START,4) <> 0.
-  // Red  = competitor D < Dicker D (Dicker dearer)
-  // Green = competitor D > Dicker D (Dicker competitive)
-  const cfRef = `D${START}:D${LAST}`;
-  ws.addConditionalFormatting({
-    ref: cfRef,
-    rules: [
-      {
-        type: "expression",
-        priority: 1,
-        formulae: [`AND(MOD(ROW()-${START},4)<>0,ISNUMBER(D${START}),ISNUMBER(INDEX($D:$D,${START}+4*INT((ROW()-${START})/4))),D${START}<INDEX($D:$D,${START}+4*INT((ROW()-${START})/4)))`],
-        style: { font: { bold: true, color: { argb: RED_C   } } },
-      },
-      {
-        type: "expression",
-        priority: 2,
-        formulae: [`AND(MOD(ROW()-${START},4)<>0,ISNUMBER(D${START}),ISNUMBER(INDEX($D:$D,${START}+4*INT((ROW()-${START})/4))),D${START}>INDEX($D:$D,${START}+4*INT((ROW()-${START})/4)))`],
-        style: { font: { bold: true, color: { argb: GREEN_C } } },
-      },
-    ],
-  });
+  // Competitor rows: MOD(ROW()-START, blockSize) <> 0
+  // Dicker price for block of row r: INDEX($D:$D, START + blockSize*INT((ROW()-START)/blockSize))
+  if (competitorMeta.length > 0) {
+    const cfRef = `D${START}:D${LAST}`;
+    const dickerRef  = `${START}+${blockSize}*INT((ROW()-${START})/${blockSize})`;
+    const isCompRow  = `MOD(ROW()-${START},${blockSize})<>0`;
+    const dkPrice    = `INDEX($D:$D,${dickerRef})`;
+    const thisPrice  = `D${START}`;
+    ws.addConditionalFormatting({
+      ref: cfRef,
+      rules: [
+        {
+          type: "expression",
+          priority: 1,
+          formulae: [`AND(${isCompRow},ISNUMBER(${thisPrice}),ISNUMBER(${dkPrice}),${thisPrice}<${dkPrice})`],
+          style: { font: { bold: true, color: { argb: RED_C   } } },
+        },
+        {
+          type: "expression",
+          priority: 2,
+          formulae: [`AND(${isCompRow},ISNUMBER(${thisPrice}),ISNUMBER(${dkPrice}),${thisPrice}>${dkPrice})`],
+          style: { font: { bold: true, color: { argb: GREEN_C } } },
+        },
+      ],
+    });
+  }
 
   // ── Stream response ──────────────────────────────────────────
   const brandLabel = selectedBrands.length > 0 ? selectedBrands.join("_") : "ALL";
