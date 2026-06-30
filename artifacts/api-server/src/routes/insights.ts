@@ -182,13 +182,14 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         p.vpn_display, p.description,
         COALESCE(dd.soh, 0) AS dicker_soh,
         json_agg(json_build_object('name', c.disti_name, 'soh', c.soh)
-          ORDER BY c.soh DESC)  AS competitors_in_stock
+          ORDER BY c.soh DESC NULLS LAST) AS competitors_in_stock,
+        SUM(COALESCE(c.soh, 0)) AS total_comp_soh
       FROM dicker dd
       JOIN brand_products p ON p.id = dd.product_id
       JOIN comps c ON c.product_id = dd.product_id AND COALESCE(c.soh, 0) > 0
       WHERE COALESCE(dd.soh, 0) = 0
       GROUP BY p.vpn_display, p.description, dd.soh
-      ORDER BY (SELECT SUM(s) FROM unnest(array_agg(c.soh)) AS s) DESC
+      ORDER BY SUM(COALESCE(c.soh, 0)) DESC
       LIMIT 50
     ),
     avail_wins AS (
@@ -229,7 +230,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       SELECT
         p.vpn_display, p.description,
         COALESCE(dd.soh, 0) AS dicker_soh,
-        MAX(c.disti_name) FILTER (WHERE c.soh = MAX(c.soh) OVER (PARTITION BY c.product_id)) AS deepest_comp_name,
+        (array_agg(c.disti_name ORDER BY COALESCE(c.soh, 0) DESC))[1] AS deepest_comp_name,
         MAX(COALESCE(c.soh, 0))::int AS deepest_comp_soh
       FROM dicker dd
       JOIN brand_products p ON p.id = dd.product_id
@@ -237,7 +238,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       WHERE COALESCE(dd.soh, 0) BETWEEN 1 AND 5
         AND COALESCE(c.soh, 0) >= 20
       GROUP BY p.vpn_display, p.description, dd.soh
-      ORDER BY dd.soh ASC
+      ORDER BY dicker_soh ASC
       LIMIT 30
     )
     SELECT
