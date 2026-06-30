@@ -501,6 +501,12 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
   const today = new Date().toISOString().split("T")[0];
   const effectiveSnapshotDate = snapshotDate ?? today;
 
+  // Merge saved profile extras (e.g. category, sku_type) into the request mapping so
+  // fields not exposed in the column-mapping UI are still captured during commit.
+  const [existingProfile] = await db.select().from(importProfilesTable).where(eq(importProfilesTable.distributorId, Number(distributorId)));
+  const profileExtras = (existingProfile?.mapping ?? {}) as Record<string, string | null>;
+  const effectiveMapping: Record<string, string | null> = { ...profileExtras, ...(mapping as Record<string, string | null>) };
+
   // Create upload record
   const [uploadRecord] = await db
     .insert(uploadsTable)
@@ -517,7 +523,7 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
 
   const committed = await commitRowsBatched(
     rows,
-    mapping as Record<string, string | null>,
+    effectiveMapping,
     uploadRecord.id,
     Number(distributorId),
     effectiveSnapshotDate,
@@ -530,7 +536,7 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
   }).where(eq(uploadsTable.id, uploadRecord.id));
 
   // Save profile if requested — only if mapping has all required fields populated
-  const mappingIsValid = !!(mapping.vpn && mapping.brand && mapping.sell_price && mapping.soh);
+  const mappingIsValid = !!(effectiveMapping.vpn && effectiveMapping.brand && effectiveMapping.sell_price && effectiveMapping.soh);
   if (saveProfile && mappingIsValid) {
     const delimitedFormat = sourceFormat === "xlsx" ? null : (delimiter ?? null);
     await db
@@ -540,7 +546,7 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
         sourceFormat,
         delimiter: delimitedFormat,
         headerRowIndex: Number(headerRowIndex),
-        mapping,
+        mapping: effectiveMapping,
       })
       .onConflictDoUpdate({
         target: importProfilesTable.distributorId,
@@ -548,7 +554,7 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
           sourceFormat,
           delimiter: delimitedFormat,
           headerRowIndex: Number(headerRowIndex),
-          mapping,
+          mapping: effectiveMapping,
           updatedAt: new Date(),
         },
       });
@@ -661,6 +667,12 @@ router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" 
 
   const brandMap = await buildBrandMap();
 
+  // Merge saved profile extras (e.g. category, sku_type) into the request mapping so
+  // fields not exposed in the column-mapping UI are still captured during commit.
+  const [existingProfile2] = await db.select().from(importProfilesTable).where(eq(importProfilesTable.distributorId, Number(distributorId)));
+  const profileExtras2 = (existingProfile2?.mapping ?? {}) as Record<string, string | null>;
+  const effectiveMapping2: Record<string, string | null> = { ...profileExtras2, ...mapping };
+
   const [uploadRecord] = await db
     .insert(uploadsTable)
     .values({
@@ -676,7 +688,7 @@ router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" 
 
   const committed = await commitRowsBatched(
     rows,
-    mapping,
+    effectiveMapping2,
     uploadRecord.id,
     Number(distributorId),
     effectiveSnapshotDate,
@@ -685,16 +697,16 @@ router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" 
 
   await db.update(uploadsTable).set({ rowCountMatched: committed, status: "committed" }).where(eq(uploadsTable.id, uploadRecord.id));
 
-  const mappingIsValid = !!(mapping.vpn && mapping.brand && mapping.sell_price && mapping.soh);
+  const mappingIsValid = !!(effectiveMapping2.vpn && effectiveMapping2.brand && effectiveMapping2.sell_price && effectiveMapping2.soh);
   if (saveProfile && mappingIsValid) {
     const safeSourceFormat: "xlsx" | "txt" = sourceFormat === "xlsx" ? "xlsx" : "txt";
     const delimitedFormat = safeSourceFormat === "xlsx" ? null : (delimiter ?? null);
     await db
       .insert(importProfilesTable)
-      .values({ distributorId: Number(distributorId), sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping })
+      .values({ distributorId: Number(distributorId), sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping: effectiveMapping2 })
       .onConflictDoUpdate({
         target: importProfilesTable.distributorId,
-        set: { sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping, updatedAt: new Date() },
+        set: { sourceFormat: safeSourceFormat, delimiter: delimitedFormat, headerRowIndex: Number(headerRowIndex), mapping: effectiveMapping2, updatedAt: new Date() },
       });
   }
 
