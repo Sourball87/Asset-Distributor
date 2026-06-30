@@ -1,6 +1,16 @@
 import bcrypt from "bcryptjs";
 import { db, usersTable, distributorsTable, brandsTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { logger } from "./logger";
+
+const SEED_DISTRIBUTORS = [
+  { name: "Dicker Data",    isBaseline: true,  stalenessThresholdDays: 1 },
+  { name: "Ingram Micro",   isBaseline: false, stalenessThresholdDays: 1 },
+  { name: "Leader Systems", isBaseline: false, stalenessThresholdDays: 1 },
+  { name: "Synnex",         isBaseline: false, stalenessThresholdDays: 1 },
+  { name: "MMT",            isBaseline: false, stalenessThresholdDays: 1 },
+  { name: "Bluechip",       isBaseline: false, stalenessThresholdDays: 1 },
+];
 
 const SEED_BRANDS = [
   { canonicalName: "SAMSUNG",     aliases: ["Samsung", "SAMSUNG ELECTRONICS"] },
@@ -22,34 +32,39 @@ const SEED_BRANDS = [
 ];
 
 export async function seedIfEmpty(): Promise<void> {
+  let seeded = false;
+
+  // Admin user — skip if already exists
   const [existingUser] = await db.select({ id: usersTable.id }).from(usersTable).limit(1);
-  if (existingUser) {
-    return;
-  }
-
-  logger.info("Empty database detected — running initial seed");
-
-  const passwordHash = await bcrypt.hash("admin", 10);
-  await db.insert(usersTable).values({
-    email: "admin@dickerdata.com.au",
-    name: "Admin",
-    passwordHash,
-    role: "admin",
-  });
-
-  const [existingDist] = await db.select({ id: distributorsTable.id }).from(distributorsTable).limit(1);
-  if (!existingDist) {
-    await db.insert(distributorsTable).values({
-      name: "Dicker Data",
-      isBaseline: true,
-      stalenessThresholdDays: 1,
+  if (!existingUser) {
+    const passwordHash = await bcrypt.hash("admin", 10);
+    await db.insert(usersTable).values({
+      email: "admin@dickerdata.com.au",
+      name: "Admin",
+      passwordHash,
+      role: "admin",
     });
+    seeded = true;
+    logger.info("Seed: admin user created");
   }
 
-  const [existingBrand] = await db.select({ id: brandsTable.id }).from(brandsTable).limit(1);
-  if (!existingBrand) {
-    await db.insert(brandsTable).values(SEED_BRANDS);
+  // Distributors — insert any that are missing (by name, idempotent)
+  for (const dist of SEED_DISTRIBUTORS) {
+    await db
+      .insert(distributorsTable)
+      .values(dist)
+      .onConflictDoNothing({ target: distributorsTable.name });
   }
 
-  logger.info("Seed complete — admin@dickerdata.com.au created");
+  // Brands — insert any that are missing (by canonical name, idempotent)
+  for (const brand of SEED_BRANDS) {
+    await db
+      .insert(brandsTable)
+      .values(brand)
+      .onConflictDoNothing({ target: brandsTable.canonicalName });
+  }
+
+  if (seeded) {
+    logger.info("Seed complete");
+  }
 }
