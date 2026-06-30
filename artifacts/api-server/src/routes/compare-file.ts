@@ -41,19 +41,17 @@ function colLetter(n: number): string {
 }
 
 router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
-  const brandsParam      = (req.query.brands      as string | undefined) ?? "";
-  const distParam        = (req.query.distributors as string | undefined) ?? "";
+  const brandsParam = (req.query.brands      as string | undefined) ?? "";
+  const distParam   = (req.query.distributors as string | undefined) ?? "";
 
-  const selectedBrands = brandsParam.split(",").map((b) => b.trim().toUpperCase()).filter(Boolean);
+  const selectedBrands  = brandsParam.split(",").map((b) => b.trim().toUpperCase()).filter(Boolean);
   const selectedDistIds = distParam.split(",").map((s) => parseInt(s.trim())).filter((n) => !isNaN(n));
 
   // ── 1. Distributors ─────────────────────────────────────────
-  const allDists   = await db.select().from(distributorsTable).orderBy(distributorsTable.id);
-  const dickerDist = allDists.find((d) => d.isBaseline);
+  const allDists      = await db.select().from(distributorsTable).orderBy(distributorsTable.id);
+  const dickerDist    = allDists.find((d) => d.isBaseline);
   const allCompetitors = allDists.filter((d) => !d.isBaseline);
-
-  // Filter to selected competitors (or all if none specified)
-  const competitors = selectedDistIds.length > 0
+  const competitors   = selectedDistIds.length > 0
     ? allCompetitors.filter((d) => selectedDistIds.includes(d.id))
     : allCompetitors;
 
@@ -62,17 +60,11 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   //   then per competitor (3 cols each): soh, price, oo
   //   competitor i (0-based): colSoh=6+3i, colPrice=7+3i, colOo=8+3i
   interface CompetitorMeta {
-    id: number;
-    name: string;
-    label: string;
-    colSoh: number;
-    colPrice: number;
-    colOo: number;
+    id: number; name: string; label: string;
+    colSoh: number; colPrice: number; colOo: number;
   }
   const competitorMeta: CompetitorMeta[] = competitors.map((d, i) => ({
-    id:       d.id,
-    name:     d.name,
-    label:    `▸ ${d.name}`,
+    id: d.id, name: d.name, label: `▸ ${d.name}`,
     colSoh:   6 + 3 * i,
     colPrice: 7 + 3 * i,
     colOo:    8 + 3 * i,
@@ -129,7 +121,6 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   ];
   dataWs.addRow(dataHeader);
 
-  // Sort products: brand asc, dicker_soh desc (nulls last)
   const sortedProducts = [...products].sort((a, b) => {
     if (a.brand < b.brand) return -1;
     if (a.brand > b.brand) return 1;
@@ -145,54 +136,66 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     const rawSoh  = dkSnap?.soh ?? null;
     const dkSOH   = rawSoh === DICKER_SOH_SENTINEL ? null : rawSoh;
     const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
-
     const compCols = competitorMeta.flatMap((c) => {
       const snap = snapMap.get(`${p.id}:${c.id}`);
       return [
-        snap?.soh   ?? null,
+        snap?.soh ?? null,
         snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
-        snap?.soo   ?? null,
+        snap?.soo ?? null,
       ];
     });
-
     dataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
   }
 
   // ─── LOOKUP sheet ──────────────────────────────────────────
-  // Each block = 1 Dicker row + 1 row per selected competitor.
-  // Column A (merged for full block height) = yellow empty input cell.
-  // Columns B–E = side-by-side results.
+  // Layout: 7 columns A–G
+  //   A (col 1, w=24) — plain unmerged paste column; user pastes a column of SKUs here
+  //   B (col 2, w=3)  — visual gap
+  //   C (col 3, w=22) — Part Number echo (Dicker row only)
+  //   D (col 4, w=50) — Description (Dicker) / distributor label (competitors)
+  //   E (col 5, w=9)  — SOH
+  //   F (col 6, w=12) — Price (ex)
+  //   G (col 7, w=10) — On Order
+  //
+  // M = paste column height (empty slots). Cards: card k => base = 13 + blockSize*k.
+  // inref = INDEX($A$13:$A$LAST, k+1) — each card pulls the k-th paste cell.
+  // No merged cells anywhere — a column paste of any length drops straight in.
 
-  const R         = 100;
-  const blockSize = 1 + competitorMeta.length; // rows per block
-  const START     = 12;
-  const HDR       = START - 1; // block column header = row 11
-  const LAST      = START + blockSize * R - 1;
+  const M         = 300;
+  const blockSize = 1 + competitorMeta.length;
+  const PASTE_START = 13;
+  const PASTE_END   = PASTE_START + M - 1;       // last paste row
+  const CARD_END    = PASTE_START + blockSize * M - 1; // last card row
+  const HDR_ROW     = 12;                         // zone header row
 
-  ws.getColumn("A").width = 26;
-  ws.getColumn("B").width = 56;
-  ws.getColumn("C").width = 9;
-  ws.getColumn("D").width = 12;
-  ws.getColumn("E").width = 10;
+  // Column widths
+  ws.getColumn(1).width = 24;  // A paste
+  ws.getColumn(2).width = 3;   // B gap
+  ws.getColumn(3).width = 22;  // C part number echo
+  ws.getColumn(4).width = 50;  // D description / label
+  ws.getColumn(5).width = 9;   // E SOH
+  ws.getColumn(6).width = 12;  // F price
+  ws.getColumn(7).width = 10;  // G on order
 
-  ws.views = [{ showGridLines: false, state: "frozen", xSplit: 0, ySplit: HDR }];
+  // Freeze rows 1–12 (freshness strip + zone header stay visible)
+  ws.views = [{ showGridLines: false, state: "frozen", xSplit: 0, ySplit: HDR_ROW }];
 
-  // Row 1 — title
+  // ── Row 1 — title ──
   ws.getRow(1).height = 30;
-  ws.mergeCells("A1:E1");
-  const titleCell = ws.getCell("A1");
+  ws.mergeCells(1, 1, 1, 7);
+  const titleCell = ws.getCell(1, 1);
   titleCell.value     = "DICKER DATA — PRICE & STOCK LOOKUP";
   titleCell.font      = fnt({ bold: true, size: 14, color: { argb: WHITE } });
   titleCell.fill      = solid(DARK);
   titleCell.alignment = { horizontal: "center", vertical: "middle" };
 
-  // Row 3 — freshness panel label
-  ws.mergeCells("A3:E3");
-  const fpLabel = ws.getCell("A3");
+  // ── Row 3 — freshness panel label ──
+  ws.mergeCells(3, 1, 3, 7);
+  const fpLabel = ws.getCell(3, 1);
   fpLabel.value = "PRICE FILE FRESHNESS — how current each distributor's feed is (upload / refresh when a feed goes stale)";
   fpLabel.font  = fnt({ bold: true, color: { argb: DARK } });
 
-  // Row 4 — freshness column headers
+  // ── Row 4 — freshness column headers ──
   (["Distributor","Price file date","Days old","Status"] as const).forEach((h, i) => {
     const c = ws.getCell(4, i + 1);
     c.value     = h;
@@ -201,7 +204,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     c.alignment = { horizontal: "center", vertical: "middle" };
   });
 
-  // Rows 5..(4+freshnessLines.length) — per-distributor freshness
+  // ── Rows 5..N — per-distributor freshness ──
   const freshnessLines = [
     { label: "Dicker Data", dist: dickerDist },
     ...competitors.map((d) => ({ label: d.name, dist: d })),
@@ -212,7 +215,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     aCell.value = label;
     aCell.font  = fnt({ bold: true, color: { argb: DARK } });
 
-    const bCell   = ws.getCell(rn, 2);
+    const bCell    = ws.getCell(rn, 2);
     const lastDate = dist ? freshnessMap.get(dist.id) : null;
     if (lastDate) {
       bCell.value  = new Date(lastDate + "T00:00:00");
@@ -241,116 +244,130 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     ],
   });
 
-  // Row 10 — instruction
-  ws.mergeCells("A10:E10");
-  const instrCell = ws.getCell("A10");
-  instrCell.value = "Type a vendor part number in each yellow cell (column A). Stock and pricing resolve automatically to the right.";
+  // ── Row 10 — instruction ──
+  ws.mergeCells(10, 1, 10, 7);
+  const instrCell = ws.getCell(10, 1);
+  instrCell.value = "Paste a whole list of SKUs into the yellow column (column A). The comparison cards on the right build themselves — one stacked card per SKU, in order.";
   instrCell.font  = fnt({ italic: true, color: { argb: GREY } });
 
-  // Row 11 — block column header
-  const colHdrLabels = ["Part Number", "Description / Distributor", "SOH", "Price (ex)", "On Order"];
-  colHdrLabels.forEach((h, i) => {
-    const c = ws.getCell(HDR, i + 1);
-    c.value     = h;
+  // ── Row 12 — zone headers ──
+  const hdrA = ws.getCell(HDR_ROW, 1);
+  hdrA.value     = "PASTE SKUs ▼";
+  hdrA.font      = fnt({ bold: true, color: { argb: WHITE } });
+  hdrA.fill      = solid(DARK);
+  hdrA.alignment = { horizontal: "left", indent: 1 };
+
+  const zoneHdrs = [
+    { col: 3, label: "Part Number",              center: false },
+    { col: 4, label: "Description / Distributor", center: false },
+    { col: 5, label: "SOH",                       center: true  },
+    { col: 6, label: "Price (ex)",                center: true  },
+    { col: 7, label: "On Order",                  center: true  },
+  ];
+  zoneHdrs.forEach(({ col, label, center }) => {
+    const c = ws.getCell(HDR_ROW, col);
+    c.value     = label;
     c.font      = fnt({ bold: true, color: { argb: WHITE } });
     c.fill      = solid(DARK);
-    c.alignment = { horizontal: i <= 1 ? "left" : "center", vertical: "middle", indent: i <= 1 ? 1 : 0 };
+    c.alignment = { horizontal: center ? "center" : "left", vertical: "middle", indent: center ? 0 : 1 };
   });
 
-  // ─── 4-row (or blockSize-row) blocks ────────────────────────
-  const thinIN = thin(IN_BORDER);
+  // ── Paste column A13:A{PASTE_END} — empty yellow cells ──
+  const thinIN  = thin(IN_BORDER);
+  for (let i = 0; i < M; i++) {
+    const c = ws.getCell(PASTE_START + i, 1);
+    c.fill   = solid(INFILL);
+    c.font   = fnt({ bold: false, color: { argb: DARK } });
+    c.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
+  }
+
+  // ── Cards (formula mode always, M is small enough) ──
   const topBlk = thin(BLK_BORDER);
+  // DATA column letters for Dicker
+  const dkDescLtr  = "C";  // DATA col 3
+  const dkSohLtr   = "D";  // DATA col 4
+  const dkPriceLtr = "E";  // DATA col 5
 
-  for (let k = 0; k < R; k++) {
-    const base = START + blockSize * k;
-    const ic   = `$A$${base}`;
-    const norm = `UPPER(SUBSTITUTE(TRIM(${ic})," ",""))`;
-    const mf   = `MATCH(${norm},DATA!$A:$A,0)`;
+  for (let k = 0; k < M; k++) {
+    const base   = PASTE_START + blockSize * k;
+    const inref  = `INDEX($A$${PASTE_START}:$A$${PASTE_END},${k + 1})`;
+    const norm   = `UPPER(SUBSTITUTE(TRIM(${inref})," ",""))`;
+    const mf     = `MATCH(${norm},DATA!$A:$A,0)`;
 
-    // Merged tall input cell spanning the full block
-    ws.mergeCells(base, 1, base + blockSize - 1, 1);
-    const inputCell     = ws.getCell(base, 1);
-    inputCell.fill      = solid(INFILL);
-    inputCell.font      = fnt({ bold: true, color: { argb: DARK } });
-    inputCell.alignment = { vertical: "middle", wrapText: false };
-    inputCell.border    = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
+    // Thin separator across A–G on the Dicker row
+    for (let col = 1; col <= 7; col++) {
+      const existing = ws.getCell(base, col).border ?? {};
+      ws.getCell(base, col).border = { ...existing, top: topBlk };
+    }
 
-    // Thin separator across B–E on the Dicker (top) row
-    const brkBorder = { top: topBlk };
-    ws.getCell(base, 2).border = brkBorder;
-    ws.getCell(base, 3).border = brkBorder;
-    ws.getCell(base, 4).border = brkBorder;
-    ws.getCell(base, 5).border = brkBorder;
-
-    // Dicker row
-    const dkDescCol  = colLetter(3);  // C in DATA
-    const dkSohCol   = colLetter(4);  // D
-    const dkPriceCol = colLetter(5);  // E
-
-    const bD = ws.getCell(base, 2);
-    bD.value  = { formula: `IF(${ic}="","",IFERROR(INDEX(DATA!$${dkDescCol}:$${dkDescCol},${mf}),"— part not found —"))` };
-    bD.font   = fnt({ bold: true, color: { argb: DARK } });
-
+    // Dicker row — cols C, D, E, F
     const cD = ws.getCell(base, 3);
-    cD.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${base}),INDEX(DATA!$${dkSohCol}:$${dkSohCol},${mf}),""))` };
-    cD.font      = fnt({ bold: true, color: { argb: DARK } });
-    cD.alignment = { horizontal: "center" };
+    cD.value  = { formula: `IF(${inref}="","",${inref})` };
+    cD.font   = fnt({ bold: true, color: { argb: DARK } });
 
     const dD = ws.getCell(base, 4);
-    dD.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$${dkPriceCol}:$${dkPriceCol},${mf})=0,"not stocked",INDEX(DATA!$${dkPriceCol}:$${dkPriceCol},${mf})),"not stocked"))` };
-    dD.font      = fnt({ bold: true, color: { argb: DARK } });
-    dD.alignment = { horizontal: "center" };
-    dD.numFmt    = "$#,##0.00";
+    dD.value  = { formula: `IF(${inref}="","",IFERROR(INDEX(DATA!$${dkDescLtr}:$${dkDescLtr},${mf}),"— part not found —"))` };
+    dD.font   = fnt({ color: { argb: DARK } });
+
+    const eD = ws.getCell(base, 5);
+    eD.value     = { formula: `IF(${inref}="","",IF(ISNUMBER($F${base}),INDEX(DATA!$${dkSohLtr}:$${dkSohLtr},${mf}),""))` };
+    eD.font      = fnt({ bold: true, color: { argb: DARK } });
+    eD.alignment = { horizontal: "center" };
+
+    const fD = ws.getCell(base, 6);
+    fD.value     = { formula: `IF(${inref}="","",IFERROR(IF(INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})=0,"not stocked",INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})),"not stocked"))` };
+    fD.font      = fnt({ bold: true, color: { argb: DARK } });
+    fD.alignment = { horizontal: "center" };
+    fD.numFmt    = "$#,##0.00";
 
     // Competitor rows
     competitorMeta.forEach((c, ci) => {
-      const row     = base + 1 + ci;
-      const sohCol   = colLetter(c.colSoh);
-      const priceCol = colLetter(c.colPrice);
-      const ooCol    = colLetter(c.colOo);
-
-      const bC = ws.getCell(row, 2);
-      bC.value     = { formula: `IF(${ic}="","","${c.label}")` };
-      bC.font      = fnt({ color: { argb: TEAL } });
-      bC.alignment = { horizontal: "right" };
-
-      const cC = ws.getCell(row, 3);
-      cC.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${row}),INDEX(DATA!$${sohCol}:$${sohCol},${mf}),""))` };
-      cC.alignment = { horizontal: "center" };
+      const row      = base + 1 + ci;
+      const sohLtr   = colLetter(c.colSoh);
+      const priceLtr = colLetter(c.colPrice);
+      const ooLtr    = colLetter(c.colOo);
 
       const dC = ws.getCell(row, 4);
-      dC.value     = { formula: `IF(${ic}="","",IFERROR(IF(INDEX(DATA!$${priceCol}:$${priceCol},${mf})=0,"not listed",INDEX(DATA!$${priceCol}:$${priceCol},${mf})),"not listed"))` };
-      dC.alignment = { horizontal: "center" };
-      dC.numFmt    = "$#,##0.00";
+      dC.value     = { formula: `IF(${inref}="","","${c.label}")` };
+      dC.font      = fnt({ color: { argb: TEAL } });
+      dC.alignment = { horizontal: "right" };
 
       const eC = ws.getCell(row, 5);
-      eC.value     = { formula: `IF(${ic}="","",IF(ISNUMBER($D${row}),INDEX(DATA!$${ooCol}:$${ooCol},${mf}),""))` };
+      eC.value     = { formula: `IF(${inref}="","",IF(ISNUMBER($F${row}),INDEX(DATA!$${sohLtr}:$${sohLtr},${mf}),""))` };
       eC.alignment = { horizontal: "center" };
+
+      const fC = ws.getCell(row, 6);
+      fC.value     = { formula: `IF(${inref}="","",IFERROR(IF(INDEX(DATA!$${priceLtr}:$${priceLtr},${mf})=0,"not listed",INDEX(DATA!$${priceLtr}:$${priceLtr},${mf})),"not listed"))` };
+      fC.alignment = { horizontal: "center" };
+      fC.numFmt    = "$#,##0.00";
+
+      const gC = ws.getCell(row, 7);
+      gC.value     = { formula: `IF(${inref}="","",IF(ISNUMBER($F${row}),INDEX(DATA!$${ooLtr}:$${ooLtr},${mf}),""))` };
+      gC.alignment = { horizontal: "center" };
     });
   }
 
-  // ─── Price conditional formatting ─────────────────────────
-  // Competitor rows: MOD(ROW()-START, blockSize) <> 0
-  // Dicker price for block of row r: INDEX($D:$D, START + blockSize*INT((ROW()-START)/blockSize))
+  // ─── Price CF on column F ──────────────────────────────────
+  // Competitor rows: MOD(ROW()-PASTE_START, blockSize) <> 0
+  // Dicker price for current block: INDEX($F:$F, PASTE_START + blockSize*INT((ROW()-PASTE_START)/blockSize))
   if (competitorMeta.length > 0) {
-    const cfRef = `D${START}:D${LAST}`;
-    const dickerRef  = `${START}+${blockSize}*INT((ROW()-${START})/${blockSize})`;
-    const isCompRow  = `MOD(ROW()-${START},${blockSize})<>0`;
-    const dkPrice    = `INDEX($D:$D,${dickerRef})`;
-    const thisPrice  = `D${START}`;
+    const cfStart   = PASTE_START;
+    const cfEnd     = CARD_END;
+    const dickerRef = `${cfStart}+${blockSize}*INT((ROW()-${cfStart})/${blockSize})`;
+    const isComp    = `MOD(ROW()-${cfStart},${blockSize})<>0`;
+    const dkP       = `INDEX($F:$F,${dickerRef})`;
+    const thisP     = `F${cfStart}`;
     ws.addConditionalFormatting({
-      ref: cfRef,
+      ref: `F${cfStart}:F${cfEnd}`,
       rules: [
         {
-          type: "expression",
-          priority: 1,
-          formulae: [`AND(${isCompRow},ISNUMBER(${thisPrice}),ISNUMBER(${dkPrice}),${thisPrice}<${dkPrice})`],
+          type: "expression", priority: 1,
+          formulae: [`AND(${isComp},ISNUMBER(${thisP}),ISNUMBER(${dkP}),${thisP}<${dkP})`],
           style: { font: { bold: true, color: { argb: RED_C   } } },
         },
         {
-          type: "expression",
-          priority: 2,
-          formulae: [`AND(${isCompRow},ISNUMBER(${thisPrice}),ISNUMBER(${dkPrice}),${thisPrice}>${dkPrice})`],
+          type: "expression", priority: 2,
+          formulae: [`AND(${isComp},ISNUMBER(${thisP}),ISNUMBER(${dkP}),${thisP}>${dkP})`],
           style: { font: { bold: true, color: { argb: GREEN_C } } },
         },
       ],

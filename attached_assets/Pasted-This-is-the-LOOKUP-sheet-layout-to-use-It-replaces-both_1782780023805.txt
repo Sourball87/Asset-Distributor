@@ -1,0 +1,80 @@
+This is the LOOKUP sheet layout to use. It replaces both earlier layout addenda (the merged "side-by-side" version and the one-row-per-SKU "grid" version). Everything else from the main "Download Compare File" prompt is unchanged: the brand filter, the backend query, the hidden DATA sheet, ExcelJS, the freshness panel, the palette, and the conditional-formatting logic.
+
+The idea
+
+Keep the stacked card look (Dicker on top, Ingram / Synnex / Leader indented beneath) and allow pasting a whole list of SKUs at once, by separating where you paste from where it renders:
+
+
+A plain, unmerged paste column (column A) takes the SKU list — a column paste of any length drops straight in.
+The stacked cards render to the right and are formula-driven: card k pulls the k-th SKU from the paste column by position and renders its full four-row block. Each card labels itself with its SKU, so it's clear which is which.
+
+
+No merged cells anywhere, so paste just works.
+
+Sheet layout (LOOKUP)
+
+Hide gridlines. Column widths: A 24, B 3 (gap), C 22, D 50, E 9, F 12, G 10. Font Arial. Palette as before (DARK=1F2A44, TEAL=0E7C7B, GREY=6B7280, RED=C0392B, GREEN=1E8449, AMBER=B45309, INFILL=FFF7D6).
+
+
+Title A1:G1 merged — "DICKER DATA — PRICE & STOCK LOOKUP", white bold 14 on DARK, row height 30.
+Freshness panel rows 3–8 — exactly as in the main prompt (header A3:G3; column headers row 4 in A–D; one row per distributor 5–8 with date in B, =TODAY()-B{row} in C, status formula in D; red/amber/green CF on D5:D8).
+Instruction A10:G10 merged, italic 10 GREY: "Paste a whole list of SKUs into the yellow column (column A). The comparison cards on the right build themselves — one stacked card per SKU, in order."
+Zone headers, row 12 (white bold 10 on DARK):
+
+A12 = "PASTE SKUs ▼"
+C12 "Part Number", D12 "Description / Distributor", E12 "SOH", F12 "Price (ex)", G12 "On Order" (A–D left-indented, E–G centered).
+
+
+
+Paste column A13:A{13+M-1}: INFILL (FFF7D6) fill, thin D9C97A border, DARK font. M = number of card slots. For the pre-populated download, write the selected brand's SKUs here (so the file opens fully rendered); set M to the count of SKUs in the brand. For a blank/reusable tool, pre-build ~300 empty slots.
+Cards: card k (0-based) occupies base = 13 + 4*k across columns C–G. Freeze panes at A13.
+
+
+Per-card formulas
+
+Let LAST = 13 + M - 1, inref = INDEX($A$13:$A$<LAST>, k+1), nk = UPPER(SUBSTITUTE(TRIM(inref)," ","")), m = MATCH(nk, DATA!$A:$A, 0).
+
+Row base — Dicker:
+
+
+C = =IF(inref="","",inref) (bold DARK) — echoes the SKU so the card self-identifies.
+D = =IF(inref="","",IFERROR(INDEX(DATA!$C:$C,m),"— part not found —")) (description).
+E = =IF(inref="","",IF(ISNUMBER($F{base}),INDEX(DATA!$D:$D,m),"")) (bold, centered).
+F = =IF(inref="","",IFERROR(IF(INDEX(DATA!$E:$E,m)=0,"not stocked",INDEX(DATA!$E:$E,m)),"not stocked")) (bold, centered, $#,##0.00).
+Thin top border (C7CCD4) across A–G to separate cards.
+
+
+Row base+1 — Ingram:
+
+
+D = =IF(inref="","","▸ Ingram") (TEAL, right-aligned).
+E = =IF(inref="","",IF(ISNUMBER($F{base+1}),INDEX(DATA!$F:$F,m),"")).
+F = =IF(inref="","",IFERROR(IF(INDEX(DATA!$G:$G,m)=0,"not listed",INDEX(DATA!$G:$G,m)),"not listed")) ($#,##0.00).
+G = =IF(inref="","",IF(ISNUMBER($F{base+1}),INDEX(DATA!$H:$H,m),"")) (Ingram on-order).
+
+
+Row base+2 — Synnex: D = "▸ Synnex"; E uses DATA!$I:$I; F uses DATA!$J:$J; no G.
+
+Row base+3 — Leader: D = "▸ Leader"; E uses DATA!$K:$K; F uses DATA!$L:$L; no G.
+
+(E and F centered on every row; D left for Dicker description, right for the competitor labels.)
+
+Conditional formatting (price column F)
+
+Competitor price flags red when Dicker is dearer, green when cheaper, comparing each competitor's price (F) to its card's Dicker price F{base}. Apply expression rules over F13:F{13+4M-1}, anchored on F13:
+
+
+red bold where =AND(MOD(ROW()-13,4)<>0,ISNUMBER(F13),ISNUMBER(INDEX($F:$F,13+4*INT((ROW()-13)/4))),F13<INDEX($F:$F,13+4*INT((ROW()-13)/4)))
+green bold where the final comparison is > instead of <
+
+
+Behaviour / acceptance
+
+
+Pasting a column of SKUs into A fills the cards instantly, in order — no merged cells, no per-cell entry.
+Each SKU renders as a four-row stacked card: Dicker on top, then Ingram / Synnex / Leader indented beneath with right-aligned teal labels.
+Non-carrying competitor → "not listed"; part absent from Dicker → "not stocked"; carried-but-zero-stock shows the real price with SOH 0.
+Competitor price red when Dicker is dearer, green when cheaper.
+Freshness panel with live =TODAY() staleness flags is unchanged.
+Verify: a paste list of LS24D402GEEXXY, MZ-77E1T0BW, ACAC10005, BTO108_PC16250_AU3Y produces four correct cards — the first showing Dicker plus all three competitors, the second showing Leader only with "not listed" against Ingram and Synnex.
+Performance: for a very large brand (e.g. Lenovo, ~2,000+ SKUs) the formula count gets heavy; render those cards as static values instead of formulas (identical look), as already noted in the main prompt.
