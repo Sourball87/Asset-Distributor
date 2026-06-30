@@ -115,7 +115,7 @@ async function parseFile(file: File): Promise<ParsePreview & { clientRows?: Reco
   // Large files: parse client-side, then POST only column headers + 50 sample rows for detection
   if (file.size > LARGE_FILE_THRESHOLD) {
     const { columns, allRows } = await parseClientSide(file);
-    const sampleRows = allRows.slice(0, 200);
+    const sampleRows = allRows.slice(0, 50);
     const res = await apiFetch("/api/uploads/detect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
