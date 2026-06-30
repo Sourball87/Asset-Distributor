@@ -55,7 +55,8 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh,
         ss.soo,
         ss.snapshot_date,
-        ss.category
+        ss.category,
+        ss.sku_type
       FROM stock_snapshots ss
       WHERE ss.product_id IN (SELECT id FROM brand_products)
       ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC
@@ -65,6 +66,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       FROM latest_ss ls
       JOIN distributors d ON d.id = ls.distributor_id AND d.is_baseline = true
       WHERE (ls.category IS NULL OR upper(ls.category) <> 'WARRANTY')
+        AND (ls.sku_type IS NULL OR upper(ls.sku_type) <> 'BUNDLEDITEM')
     ),
     comps AS (
       SELECT ls.product_id, ls.distributor_id, d.name AS disti_name, ls.sell_price, ls.soh, ls.soo

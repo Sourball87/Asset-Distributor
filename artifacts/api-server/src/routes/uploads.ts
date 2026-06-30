@@ -251,6 +251,7 @@ interface ParsedSnapshotRow {
   soh: number | null;
   soo: number | null;
   category: string | null;
+  skuType: string | null;
 }
 
 const DB_CHUNK = 500;
@@ -284,6 +285,7 @@ async function commitRowsBatched(
     const soh = sohRaw === 999999999 ? 0 : sohRaw;
     const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
     const category = mapping.category ? ((row[mapping.category] ?? "").trim() || null) : null;
+    const skuType  = mapping.sku_type  ? ((row[mapping.sku_type]  ?? "").trim() || null) : null;
 
     parsed.push({
       vpnNormalized,
@@ -294,6 +296,7 @@ async function commitRowsBatched(
       soh,
       soo: soo ?? null,
       category,
+      skuType,
     });
 
     seenVpn.add(vpnNormalized);
@@ -348,6 +351,7 @@ async function commitRowsBatched(
         soh: r.soh,
         soo: r.soo,
         category: r.category,
+        skuType: r.skuType,
       };
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
