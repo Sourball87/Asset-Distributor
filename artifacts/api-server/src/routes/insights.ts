@@ -65,8 +65,10 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       SELECT ls.product_id, ls.sell_price, ls.soh, ls.soo, ls.snapshot_date
       FROM latest_ss ls
       JOIN distributors d ON d.id = ls.distributor_id AND d.is_baseline = true
+      JOIN brand_products bp ON bp.id = ls.product_id
       WHERE (ls.category IS NULL OR upper(ls.category) <> 'WARRANTY')
         AND (ls.sku_type IS NULL OR upper(ls.sku_type) <> 'BUNDLEDITEM')
+        AND bp.description NOT ILIKE 'BUNDLE %'
     ),
     comps AS (
       SELECT ls.product_id, ls.distributor_id, d.name AS disti_name, ls.sell_price, ls.soh, ls.soo
