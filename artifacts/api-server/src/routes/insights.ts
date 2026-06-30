@@ -52,7 +52,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         ss.product_id,
         ss.distributor_id,
         ss.sell_price::numeric AS sell_price,
-        ss.soh,
+        CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh,
         ss.soo,
         ss.snapshot_date
       FROM stock_snapshots ss

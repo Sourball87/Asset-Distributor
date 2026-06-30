@@ -20,7 +20,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       ss.upload_id,
       ss.snapshot_date,
       ss.sell_price,
-      ss.soh,
+      CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh,
       ss.soo
     FROM stock_snapshots ss
     ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
@@ -32,7 +32,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       ss.product_id,
       ss.distributor_id,
       ss.snapshot_date as prev_date,
-      ss.soh as prev_soh
+      CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS prev_soh
     FROM stock_snapshots ss
     WHERE NOT EXISTS (
       SELECT 1 FROM stock_snapshots newer
@@ -69,7 +69,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
   // Build map of second-latest for movement
   const allSnapsByProductDisti = new Map<string, SnapshotRow[]>();
   const allSnapshotsRaw = await db.execute(sql`
-    SELECT ss.product_id, ss.distributor_id, ss.snapshot_date, ss.soh, ss.upload_id, ss.id, ss.sell_price, ss.soo
+    SELECT ss.product_id, ss.distributor_id, ss.snapshot_date, CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh, ss.upload_id, ss.id, ss.sell_price, ss.soo
     FROM stock_snapshots ss
     ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC
   `);
