@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, integer, numeric, date, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, timestamp, integer, numeric, date, text, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { uploadsTable } from "./uploads";
@@ -14,6 +14,7 @@ export const stockSnapshotsTable = pgTable("stock_snapshots", {
   sellPrice: numeric("sell_price", { precision: 12, scale: 2 }),
   soh: integer("soh"),
   soo: integer("soo"),
+  category: text("category"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("idx_ss_distributor_id").on(t.distributorId),

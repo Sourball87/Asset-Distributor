@@ -250,6 +250,7 @@ interface ParsedSnapshotRow {
   sellPrice: string | null;
   soh: number | null;
   soo: number | null;
+  category: string | null;
 }
 
 const DB_CHUNK = 500;
@@ -282,6 +283,7 @@ async function commitRowsBatched(
     // 999999999 is Dicker Data's placeholder for digital/non-physical items — treat as 0 (no stock)
     const soh = sohRaw === 999999999 ? 0 : sohRaw;
     const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
+    const category = mapping.category ? ((row[mapping.category] ?? "").trim() || null) : null;
 
     parsed.push({
       vpnNormalized,
@@ -291,6 +293,7 @@ async function commitRowsBatched(
       sellPrice: sellPrice != null ? String(sellPrice) : null,
       soh,
       soo: soo ?? null,
+      category,
     });
 
     seenVpn.add(vpnNormalized);
@@ -344,6 +347,7 @@ async function commitRowsBatched(
         sellPrice: r.sellPrice,
         soh: r.soh,
         soo: r.soo,
+        category: r.category,
       };
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
