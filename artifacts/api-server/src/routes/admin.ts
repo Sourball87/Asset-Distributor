@@ -1,4 +1,6 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
 import { db, usersTable } from "@workspace/db";
 import { eq, ne, and, count } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
@@ -108,6 +110,29 @@ router.delete("/admin/users/:id", async (req, res): Promise<void> => {
 
   await db.delete(usersTable).where(eq(usersTable.id, id));
   res.sendStatus(204);
+});
+
+router.post("/admin/users/:id/reset-password", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+
+  const [existing] = await db.select({ id: usersTable.id, status: usersTable.status }).from(usersTable).where(eq(usersTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const temporaryPassword = randomBytes(6).toString("base64url").slice(0, 10) + randomBytes(2).toString("hex").toUpperCase();
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, id));
+
+  req.log.info({ adminId: req.session.userId, targetUserId: id }, "Admin reset user password");
+
+  res.json({ temporaryPassword });
 });
 
 export default router;

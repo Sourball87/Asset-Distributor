@@ -119,6 +119,18 @@ export const DeleteAdminUserResponse = zod.void()
 
 
 /**
+ * @summary Reset a user's password and return a temporary password (admin only)
+ */
+export const ResetAdminUserPasswordParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ResetAdminUserPasswordResponse = zod.object({
+  "temporaryPassword": zod.string()
+})
+
+
+/**
  * @summary List all distributors
  */
 export const ListDistributorsResponseItem = zod.object({

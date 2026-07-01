@@ -4,6 +4,7 @@ import {
   getListAdminUsersQueryKey,
   useUpdateAdminUser,
   useDeleteAdminUser,
+  useResetAdminUserPassword,
 } from "@workspace/api-client-react";
 import type { AdminUser } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,7 +18,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, CheckCircle, XCircle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Trash2, CheckCircle, XCircle, KeyRound, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 
@@ -31,6 +40,9 @@ export default function UsersSettings() {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const [resetResult, setResetResult] = useState<{ user: AdminUser; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { data: users = [], isLoading } = useListAdminUsers({
     query: { queryKey: getListAdminUsersQueryKey() },
@@ -62,6 +74,21 @@ export default function UsersSettings() {
     },
   });
 
+  const resetPassword = useResetAdminUserPassword({
+    mutation: {
+      onSuccess: (data, variables) => {
+        const targetUser = users.find((u) => u.id === variables.id);
+        if (targetUser) {
+          setResetResult({ user: targetUser, password: data.temporaryPassword });
+        }
+      },
+      onError: (err) => {
+        const msg = (err.data as { error?: string } | null)?.error ?? "Password reset failed";
+        toast({ title: "Error", description: msg, variant: "destructive" });
+      },
+    },
+  });
+
   const handleApprove = (u: AdminUser) => {
     updateUser.mutate({ id: u.id, data: { status: "active" } });
   };
@@ -80,6 +107,25 @@ export default function UsersSettings() {
     if (confirm(`Remove ${u.email}? This cannot be undone.`)) {
       deleteUser.mutate({ id: u.id });
     }
+  };
+
+  const handleResetPassword = (u: AdminUser) => {
+    if (confirm(`Reset password for ${u.email}? A temporary password will be generated.`)) {
+      resetPassword.mutate({ id: u.id });
+    }
+  };
+
+  const handleCopy = () => {
+    if (!resetResult) return;
+    navigator.clipboard.writeText(resetResult.password).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleCloseDialog = () => {
+    setResetResult(null);
+    setCopied(false);
   };
 
   const pending = users.filter((u) => u.status === "pending");
@@ -211,15 +257,27 @@ export default function UsersSettings() {
                     <TableCell className="font-mono text-xs">{format(new Date(u.createdAt), "dd.MM.yyyy")}</TableCell>
                     <TableCell className="text-right">
                       {u.id !== currentUser?.id && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => handleRemove(u)}
-                          disabled={deleteUser.isPending}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex justify-end items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title="Reset password"
+                            onClick={() => handleResetPassword(u)}
+                            disabled={resetPassword.isPending}
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleRemove(u)}
+                            disabled={deleteUser.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -229,6 +287,35 @@ export default function UsersSettings() {
           </Table>
         </div>
       </div>
+
+      {/* Reset password result dialog */}
+      <Dialog open={!!resetResult} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">Password Reset</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              A temporary password has been set for <span className="font-mono font-medium text-foreground">{resetResult?.user.email}</span>. Pass this to the user — it will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 rounded-sm border border-border bg-muted px-3 py-2">
+            <span className="flex-1 font-mono text-sm tracking-widest select-all">{resetResult?.password}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={handleCopy}
+              title="Copy to clipboard"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button size="sm" className="text-xs h-7" onClick={handleCloseDialog}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

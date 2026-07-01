@@ -66,6 +66,10 @@ export interface AdminUserUpdate {
   status?: AdminUserUpdateStatus;
 }
 
+export interface PasswordResetResult {
+  temporaryPassword: string;
+}
+
 export interface Distributor {
   id: number;
   name: string;

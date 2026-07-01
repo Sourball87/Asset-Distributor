@@ -37,6 +37,7 @@ export * from './loginInput';
 export * from './parsePreview';
 export * from './parsePreviewRowsItem';
 export * from './parseUploadInput';
+export * from './passwordResetResult';
 export * from './requestAccess201';
 export * from './requestAccessInput';
 export * from './upload';
