@@ -12,7 +12,7 @@ export const uploadsTable = pgTable("uploads", {
   snapshotDate: date("snapshot_date", { mode: "string" }).notNull(),
   rowCountTotal: integer("row_count_total").notNull().default(0),
   rowCountMatched: integer("row_count_matched").notNull().default(0),
-  uploadedBy: integer("uploaded_by").references(() => usersTable.id),
+  uploadedBy: integer("uploaded_by").references(() => usersTable.id, { onDelete: "set null" }),
   status: text("status", { enum: ["parsing", "mapped", "committed", "failed"] }).notNull().default("parsing"),
 });
 
