@@ -4,12 +4,44 @@ import { requireAuth } from "../middlewares/auth";
 
 const router = Router();
 
+// ── GET /api/insights/categories ─────────────────────────────────────────────
+router.get("/insights/categories", requireAuth, async (req, res): Promise<void> => {
+  const brandId = parseInt((req.query.brandId as string) ?? "0");
+  if (!brandId || isNaN(brandId)) {
+    res.status(400).json({ error: "brandId is required" });
+    return;
+  }
+  const brandResult = await pool.query<{ canonical_name: string }>(
+    `SELECT canonical_name FROM brands WHERE id = $1`,
+    [brandId],
+  );
+  if (!brandResult.rows[0]) {
+    res.status(404).json({ error: "Brand not found" });
+    return;
+  }
+  const brandName = brandResult.rows[0].canonical_name;
+  const result = await pool.query<{ category: string }>(
+    `SELECT DISTINCT ss.category
+     FROM stock_snapshots ss
+     JOIN distributors d ON d.id = ss.distributor_id AND d.is_baseline = true
+     JOIN products p ON p.id = ss.product_id AND p.brand = $1
+     WHERE ss.category IS NOT NULL
+       AND upper(ss.category) <> 'WARRANTY'
+       AND (ss.sku_type IS NULL OR upper(ss.sku_type) <> 'BUNDLEDITEM')
+     ORDER BY ss.category`,
+    [brandName],
+  );
+  res.json({ categories: result.rows.map((r) => r.category) });
+});
+
+// ── GET /api/insights ─────────────────────────────────────────────────────────
 router.get("/insights", requireAuth, async (req, res): Promise<void> => {
   const brandId = parseInt((req.query.brandId as string) ?? "0");
   if (!brandId || isNaN(brandId)) {
     res.status(400).json({ error: "brandId is required" });
     return;
   }
+  const category = (req.query.category as string | undefined)?.trim() || "All";
 
   // Brand lookup
   const brandResult = await pool.query<{ canonical_name: string }>(
@@ -54,6 +86,12 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
           WHERE upper(ss.category) = 'WARRANTY'
              OR upper(ss.sku_type) = 'BUNDLEDITEM'
         )
+        AND ($2 = 'All' OR p.id IN (
+          SELECT DISTINCT ss2.product_id
+          FROM stock_snapshots ss2
+          JOIN distributors d2 ON d2.id = ss2.distributor_id AND d2.is_baseline = true
+          WHERE ss2.category = $2
+        ))
     ),
     latest_ss AS (
       SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
@@ -84,6 +122,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
   // ── 1. PRICE COMPETITIVENESS ─────────────────────────────────────────────
   const priceResult = await pool.query(`
     WITH ${SHARED_CTES},
+
     benchmarked AS (
       SELECT
         dd.product_id,
@@ -180,7 +219,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       (SELECT json_agg(r) FROM reprice_targets r)                        AS reprice_targets,
       (SELECT json_agg(h) FROM headroom h)                               AS headroom,
       (SELECT json_agg(u) FROM comp_undercut u)                          AS comp_undercut
-  `, [brandName]);
+  `, [brandName, category]);
 
   const priceRow = priceResult.rows[0];
 
@@ -253,7 +292,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       (SELECT COUNT(*)::int FROM avail_wins)                AS avail_wins_count,
       (SELECT row_to_json(s) FROM soh_totals s)             AS soh_totals,
       (SELECT json_agg(r) FROM low_stock r)                 AS low_stock
-  `, [brandName]);
+  `, [brandName, category]);
 
   const stockRow = stockResult.rows[0];
 
@@ -320,7 +359,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       (SELECT COUNT(*)::int FROM range_gaps)           AS range_gap_count,
       (SELECT row_to_json(c) FROM coverage c)          AS coverage,
       (SELECT json_agg(c) FROM per_comp c)             AS per_comp
-  `, [brandName]);
+  `, [brandName, category]);
 
   const rangeRow = rangeResult.rows[0];
 

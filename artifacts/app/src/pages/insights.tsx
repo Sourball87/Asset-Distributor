@@ -5,6 +5,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
@@ -672,12 +673,26 @@ function RangeTab({ data }: { data: InsightsData }) {
 
 export default function InsightsPage() {
   const [brandId, setBrandId] = useState<number | null>(null);
+  const [category, setCategory] = useState<string>("All");
   const { data: brands } = useListBrands();
 
-  const { data: insights, isLoading, error } = useQuery<InsightsData>({
-    queryKey: ["insights", brandId],
+  const { data: categoriesData } = useQuery<{ categories: string[] }>({
+    queryKey: ["insights-categories", brandId],
     queryFn: async () => {
-      const res = await fetch(`/api/insights?brandId=${brandId}`, { credentials: "include" });
+      const res = await fetch(`/api/insights/categories?brandId=${brandId}`, { credentials: "include" });
+      if (!res.ok) return { categories: [] };
+      return res.json();
+    },
+    enabled: brandId != null,
+  });
+  const categories = categoriesData?.categories ?? [];
+
+  const { data: insights, isLoading, error } = useQuery<InsightsData>({
+    queryKey: ["insights", brandId, category],
+    queryFn: async () => {
+      const params = new URLSearchParams({ brandId: String(brandId) });
+      if (category !== "All") params.set("category", category);
+      const res = await fetch(`/api/insights?${params}`, { credentials: "include" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
@@ -690,6 +705,11 @@ export default function InsightsPage() {
   const dickerSnap = insights?.snapshots?.dicker;
   const compSnaps = insights?.snapshots?.competitors ?? [];
 
+  function handleBrandChange(v: string) {
+    setBrandId(v ? Number(v) : null);
+    setCategory("All");
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -701,7 +721,7 @@ export default function InsightsPage() {
           </p>
         </div>
 
-        {/* Brand selector */}
+        {/* Selectors + snapshot dates */}
         <div className="flex items-center gap-3">
           {insights && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -719,9 +739,26 @@ export default function InsightsPage() {
               ))}
             </div>
           )}
+
+          {/* Category selector — shown once a brand is picked and categories exist */}
+          {brandId != null && categories.length > 0 && (
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="h-8 text-xs rounded-sm w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All" className="text-xs">All categories</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Brand selector */}
           <Select
             value={brandId != null ? String(brandId) : ""}
-            onValueChange={(v) => setBrandId(v ? Number(v) : null)}
+            onValueChange={handleBrandChange}
           >
             <SelectTrigger className="h-8 text-xs rounded-sm w-44">
               <span className="truncate">
