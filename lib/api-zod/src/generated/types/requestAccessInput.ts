@@ -6,11 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface User {
-  id: number;
+export interface RequestAccessInput {
   email: string;
+  /** @minLength 1 */
   name: string;
-  role: string;
-  status: string;
-  createdAt: string;
+  /** @minLength 8 */
+  password: string;
 }

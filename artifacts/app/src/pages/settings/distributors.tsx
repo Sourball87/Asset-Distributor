@@ -13,6 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Trash2, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-context";
 
 const distributorSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -23,6 +24,8 @@ const distributorSchema = z.object({
 type DistributorFormValues = z.infer<typeof distributorSchema>;
 
 export default function Distributors() {
+  const { user } = useAuth();
+  const canEdit = user?.role !== "user";
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
@@ -112,10 +115,12 @@ export default function Distributors() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold tracking-tight">Manage Distributors</h1>
-        <Button size="sm" className="h-8 rounded-sm text-xs" onClick={handleOpenCreate}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          New Distributor
-        </Button>
+        {canEdit && (
+          <Button size="sm" className="h-8 rounded-sm text-xs" onClick={handleOpenCreate}>
+            <Plus className="h-4 w-4 mr-1.5" />
+            New Distributor
+          </Button>
+        )}
       </div>
 
       <div className="border border-border rounded-sm bg-card overflow-hidden">
@@ -156,19 +161,21 @@ export default function Distributors() {
                     {dist.lastUploadAt ? format(new Date(dist.lastUploadAt), 'dd.MM.yyyy') : 'Never'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end items-center gap-2">
-                      {!dist.isBaseline && (
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => handleSetBaseline(dist.id)}>
-                          Set Baseline
+                    {canEdit && (
+                      <div className="flex justify-end items-center gap-2">
+                        {!dist.isBaseline && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => handleSetBaseline(dist.id)}>
+                            Set Baseline
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(dist)}>
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(dist)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(dist.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(dist.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

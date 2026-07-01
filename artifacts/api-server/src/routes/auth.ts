@@ -6,6 +6,7 @@ import {
   LoginBody,
   LoginResponse,
   GetMeResponse,
+  RequestAccessBody,
 } from "@workspace/api-zod";
 
 declare module "express-session" {
@@ -37,6 +38,11 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  if (user.status !== "active") {
+    res.status(403).json({ error: "Your account is awaiting approval. An admin will review your request shortly." });
+    return;
+  }
+
   req.session.userId = user.id;
   req.session.save((err) => {
     if (err) {
@@ -49,6 +55,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
       createdAt: user.createdAt.toISOString(),
     }));
   });
@@ -79,8 +86,38 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     email: user.email,
     name: user.name,
     role: user.role,
+    status: user.status,
     createdAt: user.createdAt.toISOString(),
   }));
+});
+
+router.post("/auth/request-access", async (req, res): Promise<void> => {
+  const parsed = RequestAccessBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { email, name, password } = parsed.data;
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const [existing] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, normalizedEmail));
+  if (existing) {
+    res.status(409).json({ error: "An account with that email already exists." });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  await db.insert(usersTable).values({
+    email: normalizedEmail,
+    name: name.trim(),
+    passwordHash,
+    role: "user",
+    status: "pending",
+  });
+
+  res.status(201).json({ message: "Access request submitted. An admin will review your request shortly." });
 });
 
 export default router;

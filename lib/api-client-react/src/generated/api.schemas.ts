@@ -18,12 +18,52 @@ export interface User {
   email: string;
   name: string;
   role: string;
+  status: string;
   createdAt: string;
 }
 
 export interface LoginInput {
   email: string;
   password: string;
+}
+
+export interface RequestAccessInput {
+  email: string;
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 8 */
+  password: string;
+}
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  status: string;
+  createdAt: string;
+}
+
+export type AdminUserUpdateRole = typeof AdminUserUpdateRole[keyof typeof AdminUserUpdateRole];
+
+
+export const AdminUserUpdateRole = {
+  admin: 'admin',
+  superuser: 'superuser',
+  user: 'user',
+} as const;
+
+export type AdminUserUpdateStatus = typeof AdminUserUpdateStatus[keyof typeof AdminUserUpdateStatus];
+
+
+export const AdminUserUpdateStatus = {
+  active: 'active',
+  pending: 'pending',
+} as const;
+
+export interface AdminUserUpdate {
+  role?: AdminUserUpdateRole;
+  status?: AdminUserUpdateStatus;
 }
 
 export interface Distributor {
@@ -249,6 +289,10 @@ export interface DashboardSummary {
   dickerMostExpensiveCount: number;
   totalNetMovement: number;
 }
+
+export type RequestAccess201 = {
+  message: string;
+};
 
 export type ListUploadsParams = {
 distributorId?: number;

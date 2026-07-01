@@ -29,6 +29,7 @@ export const LoginResponse = zod.object({
   "email": zod.string(),
   "name": zod.string(),
   "role": zod.string(),
+  "status": zod.string(),
   "createdAt": zod.string()
 })
 
@@ -47,8 +48,74 @@ export const GetMeResponse = zod.object({
   "email": zod.string(),
   "name": zod.string(),
   "role": zod.string(),
+  "status": zod.string(),
   "createdAt": zod.string()
 })
+
+
+/**
+ * @summary Submit a request for account access
+ */
+
+export const requestAccessBodyPasswordMin = 8;
+
+
+
+export const RequestAccessBody = zod.object({
+  "email": zod.string(),
+  "name": zod.string().min(1),
+  "password": zod.string().min(requestAccessBodyPasswordMin)
+})
+
+export const RequestAccessResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary List all users (admin only)
+ */
+export const ListAdminUsersResponseItem = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "name": zod.string(),
+  "role": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.string()
+})
+export const ListAdminUsersResponse = zod.array(ListAdminUsersResponseItem)
+
+
+/**
+ * @summary Update a user's role or status (admin only)
+ */
+export const UpdateAdminUserParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateAdminUserBody = zod.object({
+  "role": zod.enum(['admin', 'superuser', 'user']).optional(),
+  "status": zod.enum(['active', 'pending']).optional()
+})
+
+export const UpdateAdminUserResponse = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "name": zod.string(),
+  "role": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Remove a user (admin only)
+ */
+export const DeleteAdminUserParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAdminUserResponse = zod.void()
 
 
 /**

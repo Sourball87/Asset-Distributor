@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: auth
     description: Authentication
+  - name: admin
+    description: Admin user management
   - name: distributors
     description: Distributor management
   - name: brands
@@ -86,6 +88,137 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/request-access:
+    post:
+      operationId: requestAccess
+      tags: [auth]
+      summary: Submit a request for account access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestAccessInput"
+      responses:
+        "201":
+          description: Request submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # --- Admin ---
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [admin]
+      summary: List all users (admin only)
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}:
+    patch:
+      operationId: updateAdminUser
+      tags: [admin]
+      summary: Update a user's role or status (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict (e.g. last admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAdminUser
+      tags: [admin]
+      summary: Remove a user (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict (e.g. last admin or self)
           content:
             application/json:
               schema:
@@ -428,7 +561,7 @@ components:
     # --- Auth ---
     User:
       type: object
-      required: [id, email, name, role, createdAt]
+      required: [id, email, name, role, status, createdAt]
       properties:
         id:
           type: integer
@@ -437,6 +570,8 @@ components:
         name:
           type: string
         role:
+          type: string
+        status:
           type: string
         createdAt:
           type: string
@@ -449,6 +584,47 @@ components:
           type: string
         password:
           type: string
+
+    RequestAccessInput:
+      type: object
+      required: [email, name, password]
+      properties:
+        email:
+          type: string
+        name:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+
+    # --- Admin ---
+    AdminUser:
+      type: object
+      required: [id, email, name, role, status, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+
+    AdminUserUpdate:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, superuser, user]
+        status:
+          type: string
+          enum: [active, pending]
 
     # --- Distributors ---
     Distributor:

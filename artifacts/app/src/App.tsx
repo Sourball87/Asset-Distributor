@@ -8,6 +8,7 @@ import { useEffect } from "react";
 
 // Pages
 import Login from "@/pages/login";
+import RequestAccess from "@/pages/request-access";
 import Dashboard from "@/pages/dashboard";
 import Comparison from "@/pages/comparison";
 import Insights from "@/pages/insights";
@@ -15,6 +16,7 @@ import ImportPage from "@/pages/import";
 import Distributors from "@/pages/settings/distributors";
 import Brands from "@/pages/settings/brands";
 import ImportProfiles from "@/pages/settings/import-profiles";
+import UsersSettings from "@/pages/settings/users";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -39,10 +41,31 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
   return <Component {...rest} />;
 }
 
+// Admin-only route wrapper
+function AdminRoute({ component: Component, ...rest }: any) {
+  const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!isLoading && (!user || user.role !== "admin")) {
+      setLocation("/");
+    }
+  }, [user, isLoading, setLocation]);
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center text-sm font-mono">Loading...</div>;
+  }
+
+  if (!user || user.role !== "admin") return null;
+
+  return <Component {...rest} />;
+}
+
 function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/request-access" component={RequestAccess} />
       
       <Route path="/">
         {() => (
@@ -96,6 +119,14 @@ function Router() {
         {() => (
           <Layout>
             <ProtectedRoute component={ImportProfiles} />
+          </Layout>
+        )}
+      </Route>
+
+      <Route path="/settings/users">
+        {() => (
+          <Layout>
+            <AdminRoute component={UsersSettings} />
           </Layout>
         )}
       </Route>

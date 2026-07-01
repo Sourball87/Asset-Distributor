@@ -1,8 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
-import { useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useLogout, getGetMeQueryKey, useListAdminUsers, getListAdminUsersQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp, FileSliders } from "lucide-react";
+import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp, FileSliders, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -10,7 +10,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, setUser } = useAuth();
   const [location] = useLocation();
   const queryClient = useQueryClient();
-  
+
   const logout = useLogout({
     mutation: {
       onSuccess: () => {
@@ -20,23 +20,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   });
 
+  const { data: allUsers = [] } = useListAdminUsers({
+    query: {
+      queryKey: getListAdminUsersQueryKey(),
+      enabled: user?.role === "admin",
+      refetchInterval: 60_000,
+    }
+  });
+
   if (!user) return <>{children}</>;
 
   const handleLogout = () => {
     logout.mutate();
   };
 
+  const pendingCount = user.role === "admin"
+    ? allUsers.filter((u) => u.status === "pending").length
+    : 0;
+
+  const isUser = user.role === "user";
+  const isAdmin = user.role === "admin";
+
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/comparison", label: "Comparison", icon: Grid },
     { href: "/insights", label: "Insights", icon: TrendingUp },
-    { href: "/import", label: "Import", icon: Upload },
+    ...(!isUser ? [{ href: "/import", label: "Import", icon: Upload }] : []),
   ];
 
   const settingsItems = [
     { href: "/settings/distributors", label: "Distributors", icon: Building2 },
     { href: "/settings/brands", label: "Brands", icon: Package },
-    { href: "/settings/import-profiles", label: "Import Profiles", icon: FileSliders },
+    ...(!isUser ? [{ href: "/settings/import-profiles", label: "Import Profiles", icon: FileSliders }] : []),
+    ...(isAdmin ? [{ href: "/settings/users", label: "Users", icon: Users, badge: pendingCount }] : []),
   ];
 
   return (
@@ -68,7 +84,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
             {settingsItems.map((item) => (
               <Link key={item.href} href={item.href} className={`flex items-center gap-2 px-2 py-1.5 rounded-sm transition-colors ${location === item.href ? 'bg-secondary text-secondary-foreground font-medium' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}`}>
                 <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span className="flex-1">{item.label}</span>
+                {'badge' in item && item.badge != null && item.badge > 0 && (
+                  <span className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-sm bg-destructive text-destructive-foreground text-[10px] font-bold font-mono">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             ))}
           </nav>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -107,10 +107,15 @@ export default function Login() {
             </form>
           </Form>
         </CardContent>
-        <CardFooter className="flex flex-col border-t border-border pt-4 bg-muted/20">
+        <CardFooter className="flex flex-col gap-3 border-t border-border pt-4 bg-muted/20">
           <div className="text-xs text-muted-foreground text-center">
             Demo credentials:<br/>
             <span className="font-mono text-foreground">admin@dickerdata.com.au</span> / <span className="font-mono text-foreground">admin</span>
+          </div>
+          <div className="text-xs text-center">
+            <Link href="/request-access" className="text-muted-foreground hover:text-foreground underline">
+              Request access
+            </Link>
           </div>
         </CardFooter>
       </Card>
