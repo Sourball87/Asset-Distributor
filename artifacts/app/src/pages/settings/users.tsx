@@ -8,7 +8,7 @@ import {
 } from "@workspace/api-client-react";
 import type { AdminUser } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { formatDate } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -171,7 +171,7 @@ export default function UsersSettings() {
                   <TableRow key={u.id} className={`h-10 ${idx % 2 === 0 ? "bg-background" : "bg-muted/20"}`}>
                     <TableCell className="font-medium text-xs">{u.name}</TableCell>
                     <TableCell className="font-mono text-xs">{u.email}</TableCell>
-                    <TableCell className="font-mono text-xs">{format(new Date(u.createdAt), "dd.MM.yyyy")}</TableCell>
+                    <TableCell className="font-mono text-xs">{formatDate(u.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end items-center gap-2">
                         <Button
@@ -254,7 +254,7 @@ export default function UsersSettings() {
                         </Select>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{format(new Date(u.createdAt), "dd.MM.yyyy")}</TableCell>
+                    <TableCell className="font-mono text-xs">{formatDate(u.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       {u.id !== currentUser?.id && (
                         <div className="flex justify-end items-center gap-1">

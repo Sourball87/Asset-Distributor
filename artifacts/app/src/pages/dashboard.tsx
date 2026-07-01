@@ -2,7 +2,7 @@ import { useGetDashboardSummary, getGetDashboardSummaryQueryKey } from "@workspa
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, AlertCircle, CheckCircle2, Clock } from "lucide-react";
-import { format } from "date-fns";
+import { formatDate } from "@/lib/date";
 import { DownloadCompareFile } from "@/components/download-compare-file";
 import { useAuth } from "@/lib/auth-context";
 
@@ -38,15 +38,6 @@ export default function Dashboard() {
       case 'stale_warn': return 'Warning';
       case 'stale_critical': return 'Critical';
       default: return 'No Data';
-    }
-  };
-
-  const formatDate = (dateString?: string | null) => {
-    if (!dateString) return 'Never';
-    try {
-      return format(new Date(dateString), 'dd.MM.yyyy');
-    } catch {
-      return dateString;
     }
   };
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useListDistributors, getListDistributorsQueryKey, useCreateDistributor, useUpdateDistributor, useDeleteDistributor } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { formatDate } from "@/lib/date";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -158,7 +158,7 @@ export default function Distributors() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{dist.stalenessThresholdDays} days</TableCell>
                   <TableCell className="font-mono text-xs">
-                    {dist.lastUploadAt ? format(new Date(dist.lastUploadAt), 'dd.MM.yyyy') : 'Never'}
+                    {formatDate(dist.lastUploadAt)}
                   </TableCell>
                   <TableCell className="text-right">
                     {canEdit && (
