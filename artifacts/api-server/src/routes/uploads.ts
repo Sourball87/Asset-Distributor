@@ -251,6 +251,7 @@ interface ParsedSnapshotRow {
   soh: number | null;
   soo: number | null;
   category: string | null;
+  secondaryCategory: string | null;
   skuType: string | null;
 }
 
@@ -284,8 +285,9 @@ async function commitRowsBatched(
     // 999999999 is Dicker Data's placeholder for digital/non-physical items — treat as 0 (no stock)
     const soh = sohRaw === 999999999 ? 0 : sohRaw;
     const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
-    const category = mapping.category ? ((row[mapping.category] ?? "").trim() || null) : null;
-    const skuType  = mapping.sku_type  ? ((row[mapping.sku_type]  ?? "").trim() || null) : null;
+    const category          = mapping.category           ? ((row[mapping.category]           ?? "").trim() || null) : null;
+    const secondaryCategory = mapping.secondary_category ? ((row[mapping.secondary_category] ?? "").trim() || null) : null;
+    const skuType           = mapping.sku_type           ? ((row[mapping.sku_type]           ?? "").trim() || null) : null;
 
     parsed.push({
       vpnNormalized,
@@ -296,6 +298,7 @@ async function commitRowsBatched(
       soh,
       soo: soo ?? null,
       category,
+      secondaryCategory,
       skuType,
     });
 
@@ -351,6 +354,7 @@ async function commitRowsBatched(
         soh: r.soh,
         soo: r.soo,
         category: r.category,
+        secondaryCategory: r.secondaryCategory,
         skuType: r.skuType,
       };
     })

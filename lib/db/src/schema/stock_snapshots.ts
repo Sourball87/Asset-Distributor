@@ -16,6 +16,7 @@ export const stockSnapshotsTable = pgTable("stock_snapshots", {
   soo: integer("soo"),
   category: text("category"),
   skuType: text("sku_type"),
+  secondaryCategory: text("secondary_category"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("idx_ss_distributor_id").on(t.distributorId),

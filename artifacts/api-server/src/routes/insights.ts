@@ -84,6 +84,7 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
           FROM stock_snapshots ss
           JOIN distributors d ON d.id = ss.distributor_id AND d.is_baseline = true
           WHERE upper(ss.category) = 'WARRANTY'
+             OR upper(ss.secondary_category) = 'WARRANTY'
              OR upper(ss.sku_type) = 'BUNDLEDITEM'
         )
         AND ($2 = 'All' OR p.id IN (
