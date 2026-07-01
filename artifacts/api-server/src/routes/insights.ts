@@ -2,85 +2,10 @@ import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 
-const router = Router();
-
-// ── GET /api/insights/categories ─────────────────────────────────────────────
-router.get("/insights/categories", requireAuth, async (req, res): Promise<void> => {
-  const brandId = parseInt((req.query.brandId as string) ?? "0");
-  if (!brandId || isNaN(brandId)) {
-    res.status(400).json({ error: "brandId is required" });
-    return;
-  }
-  const brandResult = await pool.query<{ canonical_name: string }>(
-    `SELECT canonical_name FROM brands WHERE id = $1`,
-    [brandId],
-  );
-  if (!brandResult.rows[0]) {
-    res.status(404).json({ error: "Brand not found" });
-    return;
-  }
-  const brandName = brandResult.rows[0].canonical_name;
-  const result = await pool.query<{ category: string }>(
-    `SELECT DISTINCT ss.category
-     FROM stock_snapshots ss
-     JOIN distributors d ON d.id = ss.distributor_id AND d.is_baseline = true
-     JOIN products p ON p.id = ss.product_id AND p.brand = $1
-     WHERE ss.category IS NOT NULL
-       AND upper(ss.category) <> 'WARRANTY'
-       AND (ss.sku_type IS NULL OR upper(ss.sku_type) <> 'BUNDLEDITEM')
-       AND ss.snapshot_date = (
-         SELECT MAX(ss2.snapshot_date)
-         FROM stock_snapshots ss2
-         JOIN distributors d2 ON d2.id = ss2.distributor_id AND d2.is_baseline = true
-       )
-     ORDER BY ss.category`,
-    [brandName],
-  );
-  res.json({ categories: result.rows.map((r) => r.category) });
-});
-
-// ── GET /api/insights ─────────────────────────────────────────────────────────
-router.get("/insights", requireAuth, async (req, res): Promise<void> => {
-  const brandId = parseInt((req.query.brandId as string) ?? "0");
-  if (!brandId || isNaN(brandId)) {
-    res.status(400).json({ error: "brandId is required" });
-    return;
-  }
-  const category = (req.query.category as string | undefined)?.trim() || "All";
-
-  // Brand lookup
-  const brandResult = await pool.query<{ canonical_name: string }>(
-    `SELECT canonical_name FROM brands WHERE id = $1`,
-    [brandId],
-  );
-  const brandRow = brandResult.rows[0];
-  if (!brandRow) {
-    res.status(404).json({ error: "Brand not found" });
-    return;
-  }
-  const brandName = brandRow.canonical_name;
-
-  // Distributors
-  const distResult = await pool.query<{ id: number; name: string; is_baseline: boolean }>(
-    `SELECT id, name, is_baseline FROM distributors ORDER BY is_baseline DESC, name`,
-  );
-  const allDistributors = distResult.rows;
-  const baseline = allDistributors.find((d) => d.is_baseline);
-  const competitors = allDistributors.filter((d) => !d.is_baseline);
-
-  if (!baseline) {
-    res.status(400).json({ error: "No baseline distributor configured" });
-    return;
-  }
-
-  // ── Shared CTEs ──────────────────────────────────────────────────────────
-  // brand_products : products for this brand passing warranty/bundle exclusions
-  // latest_ss      : most-recent snapshot per (product, distributor)
-  // current_upload : each distributor's most-recent upload date
-  // current_ss     : latest_ss rows that fall on the distributor's current upload date
-  //                  — this is the single source of "currently carried"
-  // dicker / comps : presence/price sets filtered through current_ss
-  const SHARED_CTES = `
+// ── Shared CTE builder ────────────────────────────────────────────────────────
+// $1 = brandName (canonical), $2 = category ('All' or a PrimaryCategory value)
+function buildSharedCtes(): string {
+  return `
     brand_products AS (
       SELECT p.id, p.vpn_normalized, p.vpn_display, p.description
       FROM products p
@@ -138,6 +63,216 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       JOIN distributors d ON d.id = cs.distributor_id AND d.is_baseline = false
     )
   `;
+}
+
+const router = Router();
+
+// ── GET /api/insights/categories ─────────────────────────────────────────────
+router.get("/insights/categories", requireAuth, async (req, res): Promise<void> => {
+  const brandId = parseInt((req.query.brandId as string) ?? "0");
+  if (!brandId || isNaN(brandId)) {
+    res.status(400).json({ error: "brandId is required" });
+    return;
+  }
+  const brandResult = await pool.query<{ canonical_name: string }>(
+    `SELECT canonical_name FROM brands WHERE id = $1`,
+    [brandId],
+  );
+  if (!brandResult.rows[0]) {
+    res.status(404).json({ error: "Brand not found" });
+    return;
+  }
+  const brandName = brandResult.rows[0].canonical_name;
+  const result = await pool.query<{ category: string }>(
+    `SELECT DISTINCT ss.category
+     FROM stock_snapshots ss
+     JOIN distributors d ON d.id = ss.distributor_id AND d.is_baseline = true
+     JOIN products p ON p.id = ss.product_id AND p.brand = $1
+     WHERE ss.category IS NOT NULL
+       AND upper(ss.category) <> 'WARRANTY'
+       AND (ss.sku_type IS NULL OR upper(ss.sku_type) <> 'BUNDLEDITEM')
+       AND ss.snapshot_date = (
+         SELECT MAX(ss2.snapshot_date)
+         FROM stock_snapshots ss2
+         JOIN distributors d2 ON d2.id = ss2.distributor_id AND d2.is_baseline = true
+       )
+     ORDER BY ss.category`,
+    [brandName],
+  );
+  res.json({ categories: result.rows.map((r) => r.category) });
+});
+
+// ── GET /api/insights/export ──────────────────────────────────────────────────
+// Returns the FULL list for a section (no LIMIT) as JSON rows for xlsx download.
+// ?brandId=N &category=All|<cat> &section=reprice|headroom|lost_sales|avail_wins|low_stock|exclusive_lines|range_gaps
+router.get("/insights/export", requireAuth, async (req, res): Promise<void> => {
+  const brandId = parseInt((req.query.brandId as string) ?? "0");
+  const section = (req.query.section as string | undefined) ?? "";
+  const category = (req.query.category as string | undefined)?.trim() || "All";
+
+  if (!brandId || isNaN(brandId)) { res.status(400).json({ error: "brandId required" }); return; }
+  if (!section) { res.status(400).json({ error: "section required" }); return; }
+
+  const brandResult = await pool.query<{ canonical_name: string }>(
+    `SELECT canonical_name FROM brands WHERE id = $1`, [brandId],
+  );
+  if (!brandResult.rows[0]) { res.status(404).json({ error: "Brand not found" }); return; }
+  const brandName = brandResult.rows[0].canonical_name;
+
+  const S = buildSharedCtes();
+
+  const BENCHMARKED = `
+    benchmarked AS (
+      SELECT dd.product_id, dd.sell_price AS dicker_price, COALESCE(dd.soh, 0) AS dicker_soh,
+        MIN(c.sell_price)                                                 AS min_comp_price,
+        MIN(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.sell_price END)       AS min_instock_comp_price,
+        MAX(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.disti_name END)       AS cheapest_instock_disti
+      FROM dicker dd JOIN comps c ON c.product_id = dd.product_id
+      WHERE dd.sell_price IS NOT NULL AND c.sell_price IS NOT NULL
+      GROUP BY dd.product_id, dd.sell_price, dd.soh
+    )`;
+
+  let sql: string;
+  switch (section) {
+    case "reprice":
+      sql = `WITH ${S}, ${BENCHMARKED}
+        SELECT p.vpn_display, p.description,
+          b.dicker_price, b.min_instock_comp_price AS cheapest_comp_price,
+          b.cheapest_instock_disti AS cheapest_comp_name,
+          ROUND((b.dicker_price - b.min_instock_comp_price)::numeric, 2) AS gap_dollars,
+          CASE WHEN b.min_instock_comp_price > 0
+            THEN ROUND(((b.dicker_price - b.min_instock_comp_price) / b.min_instock_comp_price * 100)::numeric, 2)
+          END AS gap_pct,
+          b.dicker_soh
+        FROM benchmarked b JOIN brand_products p ON p.id = b.product_id
+        WHERE b.dicker_price > b.min_instock_comp_price AND b.min_instock_comp_price IS NOT NULL
+        ORDER BY (b.dicker_price - b.min_instock_comp_price) DESC`;
+      break;
+    case "headroom":
+      sql = `WITH ${S}, ${BENCHMARKED}
+        SELECT p.vpn_display, p.description,
+          b.dicker_price, b.min_comp_price AS next_cheapest_price,
+          ROUND((b.min_comp_price - b.dicker_price)::numeric, 2) AS headroom_dollars,
+          CASE WHEN b.dicker_price > 0
+            THEN ROUND(((b.min_comp_price - b.dicker_price) / b.dicker_price * 100)::numeric, 2)
+          END AS headroom_pct,
+          b.dicker_soh
+        FROM benchmarked b JOIN brand_products p ON p.id = b.product_id
+        WHERE b.dicker_price < b.min_comp_price
+        ORDER BY (b.min_comp_price - b.dicker_price) DESC`;
+      break;
+    case "lost_sales":
+      sql = `WITH ${S}
+        SELECT p.vpn_display, p.description,
+          COALESCE(dd.soh, 0) AS dicker_soh,
+          string_agg(c.disti_name || ': ' || COALESCE(c.soh,0)::text,
+            ', ' ORDER BY c.soh DESC NULLS LAST) AS competitors_in_stock
+        FROM dicker dd
+        JOIN brand_products p ON p.id = dd.product_id
+        JOIN comps c ON c.product_id = dd.product_id AND COALESCE(c.soh,0) > 0
+        WHERE COALESCE(dd.soh,0) = 0
+        GROUP BY p.vpn_display, p.description, dd.soh
+        ORDER BY SUM(COALESCE(c.soh,0)) DESC`;
+      break;
+    case "avail_wins":
+      sql = `WITH ${S}
+        SELECT p.vpn_display, p.description,
+          COALESCE(dd.soh, 0) AS dicker_soh,
+          COUNT(c.product_id)::int AS out_of_stock_comp_count
+        FROM dicker dd
+        JOIN brand_products p ON p.id = dd.product_id
+        JOIN comps c ON c.product_id = dd.product_id
+        WHERE COALESCE(dd.soh,0) > 0
+        GROUP BY p.vpn_display, p.description, dd.soh
+        HAVING MAX(COALESCE(c.soh,0)) = 0
+        ORDER BY dd.soh DESC`;
+      break;
+    case "low_stock":
+      sql = `WITH ${S}
+        SELECT p.vpn_display, p.description,
+          COALESCE(dd.soh, 0) AS dicker_soh,
+          (array_agg(c.disti_name ORDER BY COALESCE(c.soh,0) DESC))[1] AS deepest_comp_name,
+          MAX(COALESCE(c.soh,0))::int AS deepest_comp_soh
+        FROM dicker dd
+        JOIN brand_products p ON p.id = dd.product_id
+        JOIN comps c ON c.product_id = dd.product_id
+        WHERE COALESCE(dd.soh,0) BETWEEN 1 AND 5 AND COALESCE(c.soh,0) >= 20
+        GROUP BY p.vpn_display, p.description, dd.soh
+        ORDER BY COALESCE(dd.soh,0) ASC`;
+      break;
+    case "exclusive_lines":
+      sql = `WITH ${S},
+        dicker_vpns AS (SELECT DISTINCT product_id FROM dicker),
+        comp_vpns   AS (SELECT DISTINCT product_id FROM comps)
+        SELECT p.vpn_display, p.description,
+          COALESCE(dd.sell_price, 0) AS dicker_price,
+          COALESCE(dd.soh, 0)        AS dicker_soh
+        FROM dicker_vpns dv
+        JOIN brand_products p ON p.id = dv.product_id
+        JOIN dicker dd ON dd.product_id = dv.product_id
+        WHERE dv.product_id NOT IN (SELECT product_id FROM comp_vpns)
+        ORDER BY COALESCE(dd.soh,0) DESC, COALESCE(dd.sell_price,0) DESC`;
+      break;
+    case "range_gaps":
+      sql = `WITH ${S},
+        dicker_vpns AS (SELECT DISTINCT product_id FROM dicker),
+        comp_vpns   AS (SELECT DISTINCT product_id FROM comps)
+        SELECT p.vpn_display, p.description,
+          c.disti_name AS competitor_name,
+          COALESCE(c.sell_price, 0) AS price,
+          COALESCE(c.soh, 0)        AS soh
+        FROM comp_vpns cv
+        JOIN brand_products p ON p.id = cv.product_id
+        JOIN comps c ON c.product_id = cv.product_id
+        WHERE cv.product_id NOT IN (SELECT product_id FROM dicker_vpns)
+          AND COALESCE(c.soh,0) > 0
+        ORDER BY c.soh DESC NULLS LAST`;
+      break;
+    default:
+      res.status(400).json({ error: `Unknown section: ${section}` });
+      return;
+  }
+
+  const result = await pool.query(sql, [brandName, category]);
+  res.json({ rows: result.rows });
+});
+
+// ── GET /api/insights ─────────────────────────────────────────────────────────
+router.get("/insights", requireAuth, async (req, res): Promise<void> => {
+  const brandId = parseInt((req.query.brandId as string) ?? "0");
+  if (!brandId || isNaN(brandId)) {
+    res.status(400).json({ error: "brandId is required" });
+    return;
+  }
+  const category = (req.query.category as string | undefined)?.trim() || "All";
+
+  // Brand lookup
+  const brandResult = await pool.query<{ canonical_name: string }>(
+    `SELECT canonical_name FROM brands WHERE id = $1`,
+    [brandId],
+  );
+  const brandRow = brandResult.rows[0];
+  if (!brandRow) {
+    res.status(404).json({ error: "Brand not found" });
+    return;
+  }
+  const brandName = brandRow.canonical_name;
+
+  // Distributors
+  const distResult = await pool.query<{ id: number; name: string; is_baseline: boolean }>(
+    `SELECT id, name, is_baseline FROM distributors ORDER BY is_baseline DESC, name`,
+  );
+  const allDistributors = distResult.rows;
+  const baseline = allDistributors.find((d) => d.is_baseline);
+  const competitors = allDistributors.filter((d) => !d.is_baseline);
+
+  if (!baseline) {
+    res.status(400).json({ error: "No baseline distributor configured" });
+    return;
+  }
+
+  // $1 = brandName, $2 = category
+  const SHARED_CTES = buildSharedCtes();
 
   // ── 1. PRICE COMPETITIVENESS ─────────────────────────────────────────────
   const priceResult = await pool.query(`

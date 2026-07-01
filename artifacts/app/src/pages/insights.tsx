@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Download, Loader2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,6 +134,115 @@ interface InsightsData {
   };
 }
 
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+type ExportSection =
+  | "reprice"
+  | "headroom"
+  | "lost_sales"
+  | "avail_wins"
+  | "low_stock"
+  | "exclusive_lines"
+  | "range_gaps";
+
+const SECTION_LABELS: Record<ExportSection, string> = {
+  reprice: "Reprice_Targets",
+  headroom: "Margin_Headroom",
+  lost_sales: "Lost_Sale_Risk",
+  avail_wins: "Availability_Wins",
+  low_stock: "Low_Stock",
+  exclusive_lines: "Exclusive_Lines",
+  range_gaps: "Range_Gaps",
+};
+
+const COLUMN_MAPS: Record<ExportSection, Array<{ key: string; header: (base: string) => string }>> = {
+  reprice: [
+    { key: "vpn_display",         header: () => "VPN" },
+    { key: "description",         header: () => "Description" },
+    { key: "dicker_price",        header: (b) => `${b} Price` },
+    { key: "cheapest_comp_price", header: () => "Cheapest Comp Price" },
+    { key: "cheapest_comp_name",  header: () => "Competitor" },
+    { key: "gap_dollars",         header: () => "Gap $" },
+    { key: "gap_pct",             header: () => "Gap %" },
+    { key: "dicker_soh",          header: (b) => `${b} SOH` },
+  ],
+  headroom: [
+    { key: "vpn_display",          header: () => "VPN" },
+    { key: "description",          header: () => "Description" },
+    { key: "dicker_price",         header: (b) => `${b} Price` },
+    { key: "next_cheapest_price",  header: () => "Next Cheapest Price" },
+    { key: "headroom_dollars",     header: () => "Headroom $" },
+    { key: "headroom_pct",         header: () => "Headroom %" },
+    { key: "dicker_soh",           header: (b) => `${b} SOH` },
+  ],
+  lost_sales: [
+    { key: "vpn_display",           header: () => "VPN" },
+    { key: "description",           header: () => "Description" },
+    { key: "dicker_soh",            header: (b) => `${b} SOH` },
+    { key: "competitors_in_stock",  header: () => "Competitors in Stock" },
+  ],
+  avail_wins: [
+    { key: "vpn_display",            header: () => "VPN" },
+    { key: "description",            header: () => "Description" },
+    { key: "dicker_soh",             header: (b) => `${b} SOH` },
+    { key: "out_of_stock_comp_count", header: () => "Competitors OOS" },
+  ],
+  low_stock: [
+    { key: "vpn_display",       header: () => "VPN" },
+    { key: "description",       header: () => "Description" },
+    { key: "dicker_soh",        header: (b) => `${b} SOH` },
+    { key: "deepest_comp_name", header: () => "Deepest Competitor" },
+    { key: "deepest_comp_soh",  header: () => "Their SOH" },
+  ],
+  exclusive_lines: [
+    { key: "vpn_display",  header: () => "VPN" },
+    { key: "description",  header: () => "Description" },
+    { key: "dicker_price", header: (b) => `${b} Price` },
+    { key: "dicker_soh",   header: (b) => `${b} SOH` },
+  ],
+  range_gaps: [
+    { key: "vpn_display",     header: () => "VPN" },
+    { key: "description",     header: () => "Description" },
+    { key: "competitor_name", header: () => "Competitor" },
+    { key: "price",           header: () => "Their Price" },
+    { key: "soh",             header: () => "Their SOH" },
+  ],
+};
+
+async function doExportSection(
+  section: ExportSection,
+  brandId: number,
+  category: string,
+  baselineName: string,
+  brandName: string,
+): Promise<void> {
+  const params = new URLSearchParams({ brandId: String(brandId), category, section });
+  const res = await fetch(`/api/insights/export?${params}`, { credentials: "include" });
+  if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
+  const { rows } = (await res.json()) as { rows: Record<string, unknown>[] };
+
+  const XLSX = await import("xlsx");
+  const cols = COLUMN_MAPS[section];
+  const wsData = rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const { key, header } of cols) {
+      out[header(baselineName)] = r[key] ?? "";
+    }
+    return out;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, SECTION_LABELS[section].replace(/_/g, " "));
+
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, "0");
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const yyyy = today.getFullYear();
+  const filename = `${brandName}_${SECTION_LABELS[section]}_${dd}.${mm}.${yyyy}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt$(n: number | null | undefined): string {
@@ -187,18 +296,46 @@ function StatCard({ label, value, sub, accent }: {
   );
 }
 
-function SectionHeader({ title, sub }: { title: string; sub?: string }) {
+function SectionHeader({
+  title,
+  sub,
+  onExport,
+  exporting,
+}: {
+  title: string;
+  sub?: string;
+  onExport?: () => void;
+  exporting?: boolean;
+}) {
   return (
-    <div className="mb-3">
-      <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider">{title}</h2>
-      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+    <div className="flex items-start justify-between mb-3 gap-3">
+      <div>
+        <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider">{title}</h2>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+      </div>
+      {onExport && (
+        <button
+          onClick={onExport}
+          disabled={exporting}
+          className="flex-shrink-0 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded-sm px-2 py-1 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+          Export
+        </button>
+      )}
     </div>
   );
 }
 
 // ─── Tab: Price Competitiveness ───────────────────────────────────────────────
 
-function PriceTab({ data }: { data: InsightsData }) {
+interface TabProps {
+  data: InsightsData;
+  doExport: (s: ExportSection) => void;
+  exportingSection: ExportSection | null;
+}
+
+function PriceTab({ data, doExport, exportingSection }: TabProps) {
   const pc = data.priceCompetitiveness;
   const baseline = data.distributors.baseline;
 
@@ -245,6 +382,8 @@ function PriceTab({ data }: { data: InsightsData }) {
           <SectionHeader
             title="Top reprice targets"
             sub="Ranked by dollar gap vs cheapest in-stock competitor — your to-do list"
+            onExport={() => doExport("reprice")}
+            exporting={exportingSection === "reprice"}
           />
           <div className="border border-border rounded-sm overflow-hidden">
             <table className="w-full text-xs">
@@ -325,6 +464,8 @@ function PriceTab({ data }: { data: InsightsData }) {
           <SectionHeader
             title="Margin headroom"
             sub="SKUs where you're cheapest — room to lift price without losing the win"
+            onExport={() => doExport("headroom")}
+            exporting={exportingSection === "headroom"}
           />
           <div className="border border-border rounded-sm overflow-hidden">
             <table className="w-full text-xs">
@@ -368,7 +509,7 @@ function PriceTab({ data }: { data: InsightsData }) {
 
 // ─── Tab: Stock Position ──────────────────────────────────────────────────────
 
-function StockTab({ data }: { data: InsightsData }) {
+function StockTab({ data, doExport, exportingSection }: TabProps) {
   const sp = data.stockPosition;
   const baseline = data.distributors.baseline;
   const dickerSoh = sp.sohTotals?.dicker_total_soh ?? 0;
@@ -397,6 +538,8 @@ function StockTab({ data }: { data: InsightsData }) {
         <SectionHeader
           title={`Lost sale risk — ${fmtN(sp.lostSales.count)} lines`}
           sub={`${baseline.name} is out of stock but a competitor has units available`}
+          onExport={sp.lostSales.count > 0 ? () => doExport("lost_sales") : undefined}
+          exporting={exportingSection === "lost_sales"}
         />
         {sp.lostSales.lines.length > 0 ? (
           <div className="border border-border rounded-sm overflow-hidden">
@@ -441,6 +584,8 @@ function StockTab({ data }: { data: InsightsData }) {
         <SectionHeader
           title={`Availability wins — ${fmtN(sp.availabilityWins.count)} lines`}
           sub={`${baseline.name} has stock and every competitor is out — push to resellers`}
+          onExport={sp.availabilityWins.count > 0 ? () => doExport("avail_wins") : undefined}
+          exporting={exportingSection === "avail_wins"}
         />
         {sp.availabilityWins.lines.length > 0 ? (
           <div className="border border-border rounded-sm overflow-hidden">
@@ -478,6 +623,8 @@ function StockTab({ data }: { data: InsightsData }) {
           <SectionHeader
             title="Low stock — competitor is deep"
             sub={`${baseline.name} SOH 1–5 while a competitor holds 20+`}
+            onExport={() => doExport("low_stock")}
+            exporting={exportingSection === "low_stock"}
           />
           <div className="border border-border rounded-sm overflow-hidden">
             <table className="w-full text-xs">
@@ -511,7 +658,7 @@ function StockTab({ data }: { data: InsightsData }) {
 
 // ─── Tab: Range & Coverage ────────────────────────────────────────────────────
 
-function RangeTab({ data }: { data: InsightsData }) {
+function RangeTab({ data, doExport, exportingSection }: TabProps) {
   const rc = data.rangeAndCoverage;
   const baseline = data.distributors.baseline;
   const cov = rc.coverage;
@@ -597,6 +744,8 @@ function RangeTab({ data }: { data: InsightsData }) {
         <SectionHeader
           title={`Exclusive lines — ${fmtN(rc.exclusiveCount)} SKUs`}
           sub={`You carry these, no competitor lists them — no price pressure`}
+          onExport={rc.exclusiveCount > 0 ? () => doExport("exclusive_lines") : undefined}
+          exporting={exportingSection === "exclusive_lines"}
         />
         {rc.exclusiveLines.length > 0 ? (
           <div className="border border-border rounded-sm overflow-hidden">
@@ -633,6 +782,8 @@ function RangeTab({ data }: { data: InsightsData }) {
         <SectionHeader
           title={`Range gaps — ${fmtN(rc.rangeGapCount)} in-stock lines`}
           sub="Competitors carry these with stock but you don't — sourcing shortlist"
+          onExport={rc.rangeGapCount > 0 ? () => doExport("range_gaps") : undefined}
+          exporting={exportingSection === "range_gaps"}
         />
         {rc.rangeGaps.length > 0 ? (
           <div className="border border-border rounded-sm overflow-hidden">
@@ -674,6 +825,7 @@ function RangeTab({ data }: { data: InsightsData }) {
 export default function InsightsPage() {
   const [brandId, setBrandId] = useState<number | null>(null);
   const [category, setCategory] = useState<string>("All");
+  const [exportingSection, setExportingSection] = useState<ExportSection | null>(null);
   const { data: brands } = useListBrands();
 
   const { data: categoriesData } = useQuery<{ categories: string[] }>({
@@ -708,6 +860,20 @@ export default function InsightsPage() {
   function handleBrandChange(v: string) {
     setBrandId(v ? Number(v) : null);
     setCategory("All");
+  }
+
+  function doExport(section: ExportSection) {
+    if (!brandId || !insights) return;
+    setExportingSection(section);
+    doExportSection(
+      section,
+      brandId,
+      category,
+      insights.distributors.baseline.name,
+      insights.brandName,
+    )
+      .catch((e) => console.error("Export error:", e))
+      .finally(() => setExportingSection(null));
   }
 
   return (
@@ -832,13 +998,13 @@ export default function InsightsPage() {
           </TabsList>
 
           <TabsContent value="price" className="mt-4">
-            <PriceTab data={insights} />
+            <PriceTab data={insights} doExport={doExport} exportingSection={exportingSection} />
           </TabsContent>
           <TabsContent value="stock" className="mt-4">
-            <StockTab data={insights} />
+            <StockTab data={insights} doExport={doExport} exportingSection={exportingSection} />
           </TabsContent>
           <TabsContent value="range" className="mt-4">
-            <RangeTab data={insights} />
+            <RangeTab data={insights} doExport={doExport} exportingSection={exportingSection} />
           </TabsContent>
         </Tabs>
       )}
