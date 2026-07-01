@@ -7,7 +7,7 @@ import {
   UpdateDistributorParams,
   DeleteDistributorParams,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 
 const router = Router();
 
@@ -39,7 +39,7 @@ router.get("/distributors", requireAuth, async (req, res): Promise<void> => {
   res.json(withUploads);
 });
 
-router.post("/distributors", requireAuth, async (req, res): Promise<void> => {
+router.post("/distributors", requireElevatedRole, async (req, res): Promise<void> => {
   const parsed = CreateDistributorBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -69,7 +69,7 @@ router.post("/distributors", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
-router.patch("/distributors/:id", requireAuth, async (req, res): Promise<void> => {
+router.patch("/distributors/:id", requireElevatedRole, async (req, res): Promise<void> => {
   const params = UpdateDistributorParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -132,7 +132,7 @@ router.patch("/distributors/:id", requireAuth, async (req, res): Promise<void> =
   });
 });
 
-router.delete("/distributors/:id", requireAuth, async (req, res): Promise<void> => {
+router.delete("/distributors/:id", requireElevatedRole, async (req, res): Promise<void> => {
   const params = DeleteDistributorParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

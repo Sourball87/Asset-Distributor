@@ -5,7 +5,7 @@ import fs from "fs";
 import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
 import { eq, desc, inArray } from "drizzle-orm";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
 
@@ -396,7 +396,7 @@ router.get("/uploads", requireAuth, async (req, res): Promise<void> => {
 });
 
 // POST /uploads/parse — parse file, return preview + auto-detect distributor
-router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, res): Promise<void> => {
+router.post("/uploads/parse", requireElevatedRole, upload.single("file"), async (req, res): Promise<void> => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;
@@ -472,7 +472,7 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
 });
 
 // POST /uploads/commit — commit parsed upload as a snapshot
-router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
+router.post("/uploads/commit", requireElevatedRole, async (req, res): Promise<void> => {
   const { distributorId, tempFileKey, mapping, sourceFormat, delimiter, headerRowIndex = 0, snapshotDate, saveProfile = false } = req.body;
 
   if (!distributorId || !tempFileKey || !mapping) {
@@ -578,7 +578,7 @@ router.post("/uploads/commit", requireAuth, async (req, res): Promise<void> => {
 });
 
 // POST /uploads/detect — column-only detection for client-side parsed files (no raw file upload)
-router.post("/uploads/detect", requireAuth, express.json({ limit: "2mb" }), async (req, res): Promise<void> => {
+router.post("/uploads/detect", requireElevatedRole, express.json({ limit: "2mb" }), async (req, res): Promise<void> => {
   const { columns, sampleRows = [], rowCountTotal = 0 } = req.body as {
     columns: string[];
     sampleRows: Record<string, string>[];
@@ -635,7 +635,7 @@ router.post("/uploads/detect", requireAuth, express.json({ limit: "2mb" }), asyn
 });
 
 // POST /uploads/commit-direct — commit from pre-parsed rows (no temp file, for large file uploads)
-router.post("/uploads/commit-direct", requireAuth, express.json({ limit: "80mb" }), async (req, res): Promise<void> => {
+router.post("/uploads/commit-direct", requireElevatedRole, express.json({ limit: "80mb" }), async (req, res): Promise<void> => {
   const {
     distributorId,
     mapping,
@@ -746,7 +746,7 @@ router.get("/distributors/:id/profile", requireAuth, async (req, res): Promise<v
   });
 });
 
-router.put("/distributors/:id/profile", requireAuth, async (req, res): Promise<void> => {
+router.put("/distributors/:id/profile", requireElevatedRole, async (req, res): Promise<void> => {
   const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
   const { sourceFormat, delimiter, headerRowIndex = 0, mapping } = req.body;
 

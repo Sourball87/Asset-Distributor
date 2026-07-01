@@ -4,8 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Upload, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { DownloadCompareFile } from "@/components/download-compare-file";
+import { useAuth } from "@/lib/auth-context";
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const canUpload = user?.role === "admin" || user?.role === "superuser";
   const { data: summary, isLoading } = useGetDashboardSummary({
     query: {
       queryKey: getGetDashboardSummaryQueryKey(),
@@ -74,12 +77,14 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-              <div className="bg-muted/30 p-2 flex justify-end">
-                <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm bg-background">
-                  <Upload className="h-3.5 w-3.5 mr-1.5" />
-                  Upload Data
-                </Button>
-              </div>
+              {canUpload && (
+                <div className="bg-muted/30 p-2 flex justify-end">
+                  <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm bg-background">
+                    <Upload className="h-3.5 w-3.5 mr-1.5" />
+                    Upload Data
+                  </Button>
+                </div>
+              )}
             </Card>
           ))}
         </div>

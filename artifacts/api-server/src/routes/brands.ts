@@ -7,7 +7,7 @@ import {
   UpdateBrandParams,
   DeleteBrandParams,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 
 const router = Router();
 
@@ -20,7 +20,7 @@ router.get("/brands", requireAuth, async (req, res): Promise<void> => {
   })));
 });
 
-router.post("/brands", requireAuth, async (req, res): Promise<void> => {
+router.post("/brands", requireElevatedRole, async (req, res): Promise<void> => {
   const parsed = CreateBrandBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -42,7 +42,7 @@ router.post("/brands", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
-router.patch("/brands/:id", requireAuth, async (req, res): Promise<void> => {
+router.patch("/brands/:id", requireElevatedRole, async (req, res): Promise<void> => {
   const params = UpdateBrandParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -77,7 +77,7 @@ router.patch("/brands/:id", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
-router.delete("/brands/:id", requireAuth, async (req, res): Promise<void> => {
+router.delete("/brands/:id", requireElevatedRole, async (req, res): Promise<void> => {
   const params = DeleteBrandParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
