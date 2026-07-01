@@ -1,13 +1,17 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import crypto from "crypto";
+import { db, usersTable, passwordResetTokensTable } from "@workspace/db";
+import { eq, and, gt, isNull } from "drizzle-orm";
 import {
   LoginBody,
   LoginResponse,
   GetMeResponse,
   RequestAccessBody,
+  ForgotPasswordBody,
+  ResetPasswordBody,
 } from "@workspace/api-zod";
+import { sendPasswordResetEmail } from "../lib/email";
 
 declare module "express-session" {
   interface SessionData {
@@ -118,6 +122,91 @@ router.post("/auth/request-access", async (req, res): Promise<void> => {
   });
 
   res.status(201).json({ message: "Access request submitted. An admin will review your request shortly." });
+});
+
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const parsed = ForgotPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const normalizedEmail = parsed.data.email.toLowerCase().trim();
+
+  const [user] = await db
+    .select({ id: usersTable.id, email: usersTable.email, status: usersTable.status })
+    .from(usersTable)
+    .where(eq(usersTable.email, normalizedEmail));
+
+  if (!user || user.status !== "active") {
+    res.json({ message: "If that email address is registered, you will receive a password reset link shortly." });
+    return;
+  }
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+  await db.insert(passwordResetTokensTable).values({
+    userId: user.id,
+    token,
+    expiresAt,
+  });
+
+  const domain = (process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : `https://${(process.env.REPLIT_DOMAINS ?? "localhost").split(",")[0]}`);
+
+  const resetUrl = `${domain}/reset-password?token=${token}`;
+
+  try {
+    await sendPasswordResetEmail({ to: user.email, resetUrl });
+  } catch (err) {
+    req.log.error({ err }, "Failed to send password reset email");
+  }
+
+  res.json({ message: "If that email address is registered, you will receive a password reset link shortly." });
+});
+
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const parsed = ResetPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { token, password } = parsed.data;
+
+  const [record] = await db
+    .select()
+    .from(passwordResetTokensTable)
+    .where(
+      and(
+        eq(passwordResetTokensTable.token, token),
+        isNull(passwordResetTokensTable.usedAt),
+        gt(passwordResetTokensTable.expiresAt, new Date()),
+      ),
+    );
+
+  if (!record) {
+    res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  await db
+    .update(usersTable)
+    .set({ passwordHash })
+    .where(eq(usersTable.id, record.userId));
+
+  await db
+    .update(passwordResetTokensTable)
+    .set({ usedAt: new Date() })
+    .where(eq(passwordResetTokensTable.id, record.id));
+
+  req.log.info({ userId: record.userId }, "Password reset completed");
+
+  res.json({ message: "Your password has been updated successfully." });
 });
 
 export default router;

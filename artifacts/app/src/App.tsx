@@ -9,6 +9,8 @@ import { useEffect } from "react";
 // Pages
 import Login from "@/pages/login";
 import RequestAccess from "@/pages/request-access";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
 import Dashboard from "@/pages/dashboard";
 import Comparison from "@/pages/comparison";
 import Insights from "@/pages/insights";
@@ -66,6 +68,8 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/request-access" component={RequestAccess} />
+      <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password" component={ResetPassword} />
       
       <Route path="/">
         {() => (

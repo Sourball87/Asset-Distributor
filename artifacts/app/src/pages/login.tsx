@@ -109,6 +109,11 @@ export default function Login() {
         </CardContent>
         <CardFooter className="flex flex-col gap-3 border-t border-border pt-4 bg-muted/20">
           <div className="text-xs text-center">
+            <Link href="/forgot-password" className="text-muted-foreground hover:text-foreground underline">
+              Forgot password?
+            </Link>
+          </div>
+          <div className="text-xs text-center">
             <Link href="/request-access" className="text-muted-foreground hover:text-foreground underline">
               Request access
             </Link>

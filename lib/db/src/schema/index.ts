@@ -5,3 +5,4 @@ export * from "./import_profiles";
 export * from "./uploads";
 export * from "./products";
 export * from "./stock_snapshots";
+export * from "./password_reset_tokens";

@@ -22,6 +22,16 @@ export interface User {
   createdAt: string;
 }
 
+export interface ForgotPasswordInput {
+  email: string;
+}
+
+export interface ResetPasswordInput {
+  token: string;
+  /** @minLength 8 */
+  password: string;
+}
+
 export interface LoginInput {
   email: string;
   password: string;
@@ -293,6 +303,14 @@ export interface DashboardSummary {
   dickerMostExpensiveCount: number;
   totalNetMovement: number;
 }
+
+export type ForgotPassword200 = {
+  message: string;
+};
+
+export type ResetPassword200 = {
+  message: string;
+};
 
 export type RequestAccess201 = {
   message: string;
