@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, uploadsTable } from "@workspace/db";
 import { eq, ne, and, count } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import {
@@ -107,6 +107,11 @@ router.delete("/admin/users/:id", async (req, res): Promise<void> => {
       return;
     }
   }
+
+  // Reassign any uploads belonging to the deleted user to the requesting admin
+  await db.update(uploadsTable)
+    .set({ uploadedBy: req.session.userId! })
+    .where(eq(uploadsTable.uploadedBy, id));
 
   await db.delete(usersTable).where(eq(usersTable.id, id));
   res.sendStatus(204);
