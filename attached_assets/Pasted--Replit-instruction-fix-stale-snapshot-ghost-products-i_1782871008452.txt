@@ -1,0 +1,56 @@
+# Replit instruction — fix stale-snapshot "ghost" products in Insights
+
+## Problem
+Uploads append `stock_snapshots` and never delete, which is correct — keep the history for the freshness panel. But "does distributor X currently carry this product" is being answered as "have we ever seen it from X" (via `latest_ss`), so products that dropped off a distributor's current pricelist still count as carried. That's the source of the 451 ghost products (old NULL-category Dicker rows) leaking into Insights as exclusive lines.
+
+## The rule (use this, not a rolling window)
+A product counts as **currently carried by a distributor if, and only if, its latest snapshot date for that distributor equals that distributor's most recent upload date.** Anchor to each distributor's own latest upload date — never a single global "most recent upload," because distributors upload on different days (Dicker today, Leader three days ago must both resolve correctly).
+
+Do **not** use a "within last N days" cutoff. N is a guess about upload cadence: too small and a distributor that uploads fortnightly disappears; too large and discontinued lines linger. The date-match rule has no magic number and self-corrects regardless of cadence.
+
+## Implement it once
+Add one CTE that both filters `latest_ss` to current-file rows and becomes the single source of "presence" for every insight:
+
+```sql
+-- most recent upload date per distributor
+current_upload AS (
+  SELECT distributor_id, MAX(snapshot_date) AS current_date
+  FROM stock_snapshots
+  GROUP BY distributor_id
+),
+-- latest_ss already = most recent row per (product, distributor) by snapshot_date DESC, id DESC
+-- keep only those whose latest row is on the distributor's current file:
+current_ss AS (
+  SELECT l.*
+  FROM latest_ss l
+  JOIN current_upload c
+    ON c.distributor_id = l.distributor_id
+   AND l.snapshot_date  = c.current_date
+)
+```
+
+Then **replace `latest_ss` with `current_ss` in every presence- or count-dependent query** — including `dicker_vpns` and the equivalent competitor-presence sets.
+
+## Apply consistently — not just the exclusive-lines query
+Presence is decided in exactly one place (`current_ss`) and every insight reads from it, so the ghost products drop out uniformly:
+- Exclusive lines (Dicker carries, no competitor does)
+- Range gaps (competitor carries, Dicker doesn't)
+- Out-of-stock vs competitor counts
+- Win-rate / price-comparison **denominators** — a SKU is "benchmarked" only if Dicker *and* the competitor are both current
+- Total SOH and per-brand counts
+- Benchmark-coverage percentages
+
+If any insight still reads `latest_ss` for presence, it will disagree with the others.
+
+## Keep intact
+- Do not delete snapshots — history stays for the freshness panel and any future trend work.
+- The freshness panel keeps using each distributor's `MAX(snapshot_date)` (which is `current_upload.current_date`) — same value, now also driving presence.
+
+## Assumption to flag
+This treats "absent from the current file" as "not carried." Distributors normally keep out-of-stock lines in the feed with 0 stock rather than dropping them, so a product falling out of the newest file is a genuine discontinuation signal. That's the intended behaviour.
+
+## Acceptance checks
+- The 451 NULL-category Dicker rows no longer appear as exclusive lines or in any presence count.
+- Upload a distributor file that omits a previously-present SKU → that SKU immediately stops counting as carried by that distributor (no N-day lag).
+- With Dicker and a competitor on different upload dates, presence for each resolves against its own latest file.
+- Win rate and "dearer/cheaper" counts move in step with the exclusive/gap lists (same denominator), because all read `current_ss`.

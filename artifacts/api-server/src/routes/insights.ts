@@ -28,6 +28,11 @@ router.get("/insights/categories", requireAuth, async (req, res): Promise<void> 
      WHERE ss.category IS NOT NULL
        AND upper(ss.category) <> 'WARRANTY'
        AND (ss.sku_type IS NULL OR upper(ss.sku_type) <> 'BUNDLEDITEM')
+       AND ss.snapshot_date = (
+         SELECT MAX(ss2.snapshot_date)
+         FROM stock_snapshots ss2
+         JOIN distributors d2 ON d2.id = ss2.distributor_id AND d2.is_baseline = true
+       )
      ORDER BY ss.category`,
     [brandName],
   );
@@ -69,10 +74,12 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
   }
 
   // ── Shared CTEs ──────────────────────────────────────────────────────────
-  // brand_products: all products for this brand
-  // latest_ss: most-recent snapshot per product+distributor (for this brand)
-  // dicker: baseline rows
-  // comps: competitor rows
+  // brand_products : products for this brand passing warranty/bundle exclusions
+  // latest_ss      : most-recent snapshot per (product, distributor)
+  // current_upload : each distributor's most-recent upload date
+  // current_ss     : latest_ss rows that fall on the distributor's current upload date
+  //                  — this is the single source of "currently carried"
+  // dicker / comps : presence/price sets filtered through current_ss
   const SHARED_CTES = `
     brand_products AS (
       SELECT p.id, p.vpn_normalized, p.vpn_display, p.description
@@ -108,15 +115,27 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
       WHERE ss.product_id IN (SELECT id FROM brand_products)
       ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
     ),
+    current_upload AS (
+      SELECT distributor_id, MAX(snapshot_date) AS current_date
+      FROM stock_snapshots
+      GROUP BY distributor_id
+    ),
+    current_ss AS (
+      SELECT l.*
+      FROM latest_ss l
+      JOIN current_upload c
+        ON c.distributor_id = l.distributor_id
+       AND l.snapshot_date  = c.current_date
+    ),
     dicker AS (
-      SELECT ls.product_id, ls.sell_price, ls.soh, ls.soo, ls.snapshot_date
-      FROM latest_ss ls
-      JOIN distributors d ON d.id = ls.distributor_id AND d.is_baseline = true
+      SELECT cs.product_id, cs.sell_price, cs.soh, cs.soo, cs.snapshot_date
+      FROM current_ss cs
+      JOIN distributors d ON d.id = cs.distributor_id AND d.is_baseline = true
     ),
     comps AS (
-      SELECT ls.product_id, ls.distributor_id, d.name AS disti_name, ls.sell_price, ls.soh, ls.soo
-      FROM latest_ss ls
-      JOIN distributors d ON d.id = ls.distributor_id AND d.is_baseline = false
+      SELECT cs.product_id, cs.distributor_id, d.name AS disti_name, cs.sell_price, cs.soh, cs.soo
+      FROM current_ss cs
+      JOIN distributors d ON d.id = cs.distributor_id AND d.is_baseline = false
     )
   `;
 
@@ -258,15 +277,15 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
     ),
     soh_totals AS (
       SELECT
-        (SELECT COALESCE(SUM(ls2.soh), 0)
-         FROM latest_ss ls2
-         JOIN distributors d2 ON d2.id = ls2.distributor_id AND d2.is_baseline = true
+        (SELECT COALESCE(SUM(cs2.soh), 0)
+         FROM current_ss cs2
+         JOIN distributors d2 ON d2.id = cs2.distributor_id AND d2.is_baseline = true
         ) AS dicker_total_soh,
         (SELECT json_agg(json_build_object(
                   'id',       d3.id,
                   'name',     d3.name,
-                  'total_soh', COALESCE((SELECT SUM(ls3.soh) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id), 0),
-                  'total_soo', (SELECT SUM(ls3.soo) FROM latest_ss ls3 WHERE ls3.distributor_id = d3.id)
+                  'total_soh', COALESCE((SELECT SUM(cs3.soh) FROM current_ss cs3 WHERE cs3.distributor_id = d3.id), 0),
+                  'total_soo', (SELECT SUM(cs3.soo) FROM current_ss cs3 WHERE cs3.distributor_id = d3.id)
                 ))
          FROM distributors d3 WHERE NOT d3.is_baseline
         ) AS comp_soh_totals
