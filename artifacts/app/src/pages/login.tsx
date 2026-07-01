@@ -82,7 +82,7 @@ export default function Login() {
                   <FormItem className="space-y-1">
                     <FormLabel className="text-xs">Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="admin@dickerdata.com.au" {...field} className="h-8 text-sm rounded-sm" />
+                      <Input placeholder="you@example.com" {...field} className="h-8 text-sm rounded-sm" />
                     </FormControl>
                     <FormMessage className="text-xs" />
                   </FormItem>
