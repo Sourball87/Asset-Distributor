@@ -247,12 +247,12 @@ async function doExportSection(
 
 function fmt$(n: number | null | undefined): string {
   if (n == null) return "—";
-  return "$" + Number(n).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return "$" + Number(n).toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return "—";
-  return Number(n).toFixed(1) + "%";
+  return Math.round(Number(n)) + "%";
 }
 
 function fmtN(n: number | null | undefined): string {
@@ -347,7 +347,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
           title="Headline"
           sub={`SKUs where both ${baseline.name} and at least one competitor have a price`}
         />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard
             label="Benchmarked SKUs"
             value={fmtN(pc.totalBenchmarked)}
@@ -363,14 +363,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
           <StatCard
             label="Dearer on"
             value={fmtN(pc.dearer.count)}
-            sub={`avg gap ${fmt$(pc.dearer.avgGapDollars)} · median ${fmt$(pc.dearer.medianGapDollars)}`}
             accent={pc.dearer.count > 0 ? "red" : "green"}
-          />
-          <StatCard
-            label="Aggregate exposure"
-            value={fmt$(pc.aggregateExposure)}
-            sub="gap × SOH on in-stock losers"
-            accent={pc.aggregateExposure > 0 ? "red" : "green"}
           />
         </div>
       </div>
