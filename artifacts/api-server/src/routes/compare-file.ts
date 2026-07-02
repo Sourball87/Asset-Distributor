@@ -315,7 +315,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     eD.alignment = { horizontal: "center" };
 
     const fD = ws.getCell(base, 6);
-    fD.value     = { formula: `IF(${inref}="","",IFERROR(IF(INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})=0,"not stocked",INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})),"not stocked"))` };
+    fD.value     = { formula: `IF(${inref}="","",IFERROR(IF(INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})="","not listed",INDEX(DATA!$${dkPriceLtr}:$${dkPriceLtr},${mf})),"not listed"))` };
     fD.font      = fnt({ bold: true, color: { argb: DARK } });
     fD.alignment = { horizontal: "center" };
     fD.numFmt    = "$#,##0.00";
