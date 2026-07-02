@@ -126,7 +126,9 @@ router.get("/insights/export", requireAuth, async (req, res): Promise<void> => {
       SELECT dd.product_id, dd.sell_price AS dicker_price, COALESCE(dd.soh, 0) AS dicker_soh,
         MIN(c.sell_price)                                                 AS min_comp_price,
         MIN(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.sell_price END)       AS min_instock_comp_price,
-        MAX(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.disti_name END)       AS cheapest_instock_disti
+        (SELECT c2.disti_name FROM comps c2
+         WHERE c2.product_id = dd.product_id AND COALESCE(c2.soh,0) > 0
+         ORDER BY c2.sell_price ASC LIMIT 1)                              AS cheapest_instock_disti
       FROM dicker dd JOIN comps c ON c.product_id = dd.product_id
       WHERE dd.sell_price IS NOT NULL AND c.sell_price IS NOT NULL
       GROUP BY dd.product_id, dd.sell_price, dd.soh
@@ -285,7 +287,9 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         COALESCE(dd.soh, 0)                                                   AS dicker_soh,
         MIN(c.sell_price)                                                     AS min_comp_price,
         MIN(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.sell_price END)           AS min_instock_comp_price,
-        MAX(CASE WHEN COALESCE(c.soh,0) > 0 THEN c.disti_name END)           AS cheapest_instock_disti
+        (SELECT c2.disti_name FROM comps c2
+         WHERE c2.product_id = dd.product_id AND COALESCE(c2.soh,0) > 0
+         ORDER BY c2.sell_price ASC LIMIT 1)                                  AS cheapest_instock_disti
       FROM dicker dd
       JOIN comps c ON c.product_id = dd.product_id
       WHERE dd.sell_price IS NOT NULL AND c.sell_price IS NOT NULL
