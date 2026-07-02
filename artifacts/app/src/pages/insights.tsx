@@ -19,6 +19,7 @@ interface RepriceTarget {
   dicker_price: number;
   cheapest_comp_price: number;
   cheapest_comp_name: string;
+  cheapest_instock_comp_soh: number;
   gap_dollars: number;
   gap_pct: number;
   dicker_soh: number;
@@ -222,14 +223,37 @@ async function doExportSection(
   const { rows } = (await res.json()) as { rows: Record<string, unknown>[] };
 
   const XLSX = await import("xlsx");
-  const cols = COLUMN_MAPS[section];
-  const wsData = rows.map((r) => {
-    const out: Record<string, unknown> = {};
-    for (const { key, header } of cols) {
-      out[header(baselineName)] = r[key] ?? "";
-    }
-    return out;
-  });
+
+  let wsData: Record<string, unknown>[];
+  if (section === "reprice") {
+    wsData = rows.map((r) => {
+      const comps = (r.all_competitors as Array<{ name: string; price: number | null; soh: number }> | null) ?? [];
+      const out: Record<string, unknown> = {
+        "VPN": r.vpn_display ?? "",
+        "Description": r.description ?? "",
+        [`${baselineName} Price`]: r.dicker_price ?? "",
+        [`${baselineName} SOH`]: r.dicker_soh ?? "",
+        "Cheapest Comp Price": r.cheapest_comp_price ?? "",
+        "Competitor": r.cheapest_comp_name ?? "",
+        "Gap $": r.gap_dollars ?? "",
+        "Gap %": r.gap_pct ?? "",
+      };
+      for (const c of comps) {
+        out[`${c.name} Price`] = c.price ?? "";
+        out[`${c.name} SOH`] = c.soh ?? "";
+      }
+      return out;
+    });
+  } else {
+    const cols = COLUMN_MAPS[section];
+    wsData = rows.map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const { key, header } of cols) {
+        out[header(baselineName)] = r[key] ?? "";
+      }
+      return out;
+    });
+  }
 
   const ws = XLSX.utils.json_to_sheet(wsData);
   const wb = XLSX.utils.book_new();
@@ -389,7 +413,8 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
                   <th className="px-3 py-2 text-left font-semibold text-muted-foreground w-28">Competitor</th>
                   <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-20">Gap $</th>
                   <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-16">Gap %</th>
-                  <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-16">SOH</th>
+                  <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-16">{baseline.name} SOH</th>
+                  <th className="px-3 py-2 text-right font-semibold text-muted-foreground w-16">Comp SOH</th>
                 </tr>
               </thead>
               <tbody>
@@ -403,6 +428,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
                     <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmt$(r.gap_dollars)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmtPct(r.gap_pct)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.dicker_soh)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.cheapest_instock_comp_soh)}</td>
                   </tr>
                 ))}
               </tbody>

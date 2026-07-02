@@ -139,13 +139,17 @@ router.get("/insights/export", requireAuth, async (req, res): Promise<void> => {
     case "reprice":
       sql = `WITH ${S}, ${BENCHMARKED}
         SELECT p.vpn_display, p.description,
-          b.dicker_price, b.min_instock_comp_price AS cheapest_comp_price,
+          b.dicker_price, b.dicker_soh,
+          b.min_instock_comp_price AS cheapest_comp_price,
           b.cheapest_instock_disti AS cheapest_comp_name,
           ROUND((b.dicker_price - b.min_instock_comp_price)::numeric, 2) AS gap_dollars,
           CASE WHEN b.min_instock_comp_price > 0
             THEN ROUND(((b.dicker_price - b.min_instock_comp_price) / b.min_instock_comp_price * 100)::numeric, 2)
           END AS gap_pct,
-          b.dicker_soh
+          (SELECT json_agg(
+             json_build_object('name', c2.disti_name, 'price', c2.sell_price, 'soh', COALESCE(c2.soh, 0))
+             ORDER BY c2.disti_name
+           ) FROM comps c2 WHERE c2.product_id = b.product_id) AS all_competitors
         FROM benchmarked b JOIN brand_products p ON p.id = b.product_id
         WHERE b.dicker_price > b.min_instock_comp_price AND b.min_instock_comp_price IS NOT NULL
         ORDER BY (b.dicker_price - b.min_instock_comp_price) DESC`;
@@ -333,6 +337,9 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         p.vpn_display, p.description,
         b.dicker_price, b.min_instock_comp_price AS cheapest_comp_price,
         b.cheapest_instock_disti AS cheapest_comp_name,
+        (SELECT c2.soh FROM comps c2
+         WHERE c2.product_id = b.product_id AND COALESCE(c2.soh,0) > 0
+         ORDER BY c2.sell_price ASC LIMIT 1)                            AS cheapest_instock_comp_soh,
         ROUND((b.dicker_price - b.min_instock_comp_price)::numeric, 2)  AS gap_dollars,
         CASE WHEN b.min_instock_comp_price > 0
           THEN ROUND(((b.dicker_price - b.min_instock_comp_price) / b.min_instock_comp_price * 100)::numeric, 2)
