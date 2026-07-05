@@ -21,6 +21,7 @@ router.get("/admin/users", async (req, res): Promise<void> => {
       role: usersTable.role,
       status: usersTable.status,
       createdAt: usersTable.createdAt,
+      lastLoginAt: usersTable.lastLoginAt,
     })
     .from(usersTable)
     .orderBy(usersTable.createdAt);
@@ -28,6 +29,7 @@ router.get("/admin/users", async (req, res): Promise<void> => {
   res.json(users.map((u) => ({
     ...u,
     createdAt: u.createdAt.toISOString(),
+    lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
   })));
 });
 

@@ -110,7 +110,8 @@ export const ListAdminUsersResponseItem = zod.object({
   "name": zod.string(),
   "role": zod.string(),
   "status": zod.string(),
-  "createdAt": zod.string()
+  "createdAt": zod.string(),
+  "lastLoginAt": zod.string().nullish()
 })
 export const ListAdminUsersResponse = zod.array(ListAdminUsersResponseItem)
 
@@ -133,7 +134,8 @@ export const UpdateAdminUserResponse = zod.object({
   "name": zod.string(),
   "role": zod.string(),
   "status": zod.string(),
-  "createdAt": zod.string()
+  "createdAt": zod.string(),
+  "lastLoginAt": zod.string().nullish()
 })
 
 

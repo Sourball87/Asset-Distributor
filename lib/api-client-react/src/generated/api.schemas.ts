@@ -52,6 +52,8 @@ export interface AdminUser {
   role: string;
   status: string;
   createdAt: string;
+  /** @nullable */
+  lastLoginAt?: string | null;
 }
 
 export type AdminUserUpdateRole = typeof AdminUserUpdateRole[keyof typeof AdminUserUpdateRole];

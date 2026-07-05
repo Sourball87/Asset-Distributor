@@ -721,6 +721,8 @@ components:
           type: string
         createdAt:
           type: string
+        lastLoginAt:
+          type: ["string", "null"]
 
     AdminUserUpdate:
       type: object

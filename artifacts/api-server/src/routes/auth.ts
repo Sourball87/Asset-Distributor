@@ -47,6 +47,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  const now = new Date();
+  await db.update(usersTable).set({ lastLoginAt: now }).where(eq(usersTable.id, user.id));
+
   req.session.userId = user.id;
   req.session.save((err) => {
     if (err) {

@@ -1,14 +1,10 @@
 import { useGetDashboardSummary, getGetDashboardSummaryQueryKey } from "@workspace/api-client-react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Upload, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { DownloadCompareFile } from "@/components/download-compare-file";
-import { useAuth } from "@/lib/auth-context";
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const canUpload = user?.role === "admin" || user?.role === "superuser";
   const { data: summary, isLoading } = useGetDashboardSummary({
     query: {
       queryKey: getGetDashboardSummaryQueryKey(),
@@ -52,7 +48,7 @@ export default function Dashboard() {
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {summary.distributorCards.map(card => (
             <Card key={card.distributorId} className="rounded-sm border-border shadow-none overflow-hidden">
-              <div className="p-3 bg-card border-b border-border flex justify-between items-start">
+              <div className="p-3 bg-card flex justify-between items-start">
                 <div>
                   <div className="font-semibold flex items-center gap-2">
                     {card.name}
@@ -68,14 +64,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-              {canUpload && (
-                <div className="bg-muted/30 p-2 flex justify-end">
-                  <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm bg-background">
-                    <Upload className="h-3.5 w-3.5 mr-1.5" />
-                    Upload Data
-                  </Button>
-                </div>
-              )}
             </Card>
           ))}
         </div>

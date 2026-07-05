@@ -217,17 +217,18 @@ export default function UsersSettings() {
                 <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider">Email</TableHead>
                 <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider w-[150px]">Role</TableHead>
                 <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider">Created</TableHead>
+                <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider">Last Login</TableHead>
                 <TableHead className="text-right font-semibold text-xs text-foreground uppercase tracking-wider">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-6 text-muted-foreground text-xs">Loading...</TableCell>
+                  <TableCell colSpan={6} className="text-center py-6 text-muted-foreground text-xs">Loading...</TableCell>
                 </TableRow>
               ) : active.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-6 text-muted-foreground text-xs">No active users.</TableCell>
+                  <TableCell colSpan={6} className="text-center py-6 text-muted-foreground text-xs">No active users.</TableCell>
                 </TableRow>
               ) : (
                 active.map((u, idx) => (
@@ -255,6 +256,7 @@ export default function UsersSettings() {
                       )}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{formatDate(u.createdAt)}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{u.lastLoginAt ? formatDate(u.lastLoginAt) : <span className="italic">never</span>}</TableCell>
                     <TableCell className="text-right">
                       {u.id !== currentUser?.id && (
                         <div className="flex justify-end items-center gap-1">
