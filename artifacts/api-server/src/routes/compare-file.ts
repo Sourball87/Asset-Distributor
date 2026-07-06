@@ -105,6 +105,288 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     snapMap.set(`${r.product_id}:${r.distributor_id}`, r);
   }
 
+  // ── 5a. Horizontal format ─────────────────────────────────────
+  if (req.query.format === "horizontal") {
+    // Column layout (1-based):
+    //   1=VPN, 2=Brand, 3=Description, 4=Dicker SOH, 5=Dicker Price,
+    //   then per competitor (4 cols each): SOH, Price, Δ$, Δ%
+    //   trailing: Cheapest Disti, DD Most Expensive
+    const BASE       = 5;
+    const COMP_STRIDE = 4;
+    const numComp    = competitors.length;
+    const compColSoh   = (i: number) => BASE + 1 + COMP_STRIDE * i;       // 6, 10, 14 …
+    const compColPrice = (i: number) => BASE + 2 + COMP_STRIDE * i;
+    const compColDelta = (i: number) => BASE + 3 + COMP_STRIDE * i;
+    const compColDPct  = (i: number) => BASE + 4 + COMP_STRIDE * i;
+    const COL_CHEAPEST = BASE + 1 + COMP_STRIDE * numComp;
+    const COL_FLAG     = COL_CHEAPEST + 1;
+    const TOTAL_COLS   = COL_FLAG;
+
+    const sortedH = [...products].sort((a, b) => {
+      if (a.brand < b.brand) return -1;
+      if (a.brand > b.brand) return 1;
+      const aSOH = dickerDist ? (snapMap.get(`${a.id}:${dickerDist.id}`)?.soh ?? -1) : -1;
+      const bSOH = dickerDist ? (snapMap.get(`${b.id}:${dickerDist.id}`)?.soh ?? -1) : -1;
+      return bSOH - aSOH;
+    });
+
+    const hwb = new ExcelJS.Workbook();
+    hwb.creator = "DistiBench";
+    const hws = hwb.addWorksheet("COMPARISON");
+
+    // Column widths
+    hws.getColumn(1).width = 22;  // VPN
+    hws.getColumn(2).width = 10;  // Brand
+    hws.getColumn(3).width = 40;  // Description
+    hws.getColumn(4).width = 9;   // Dicker SOH
+    hws.getColumn(5).width = 12;  // Dicker Price
+    for (let i = 0; i < numComp; i++) {
+      hws.getColumn(compColSoh(i)).width  = 9;
+      hws.getColumn(compColPrice(i)).width = 12;
+      hws.getColumn(compColDelta(i)).width = 13;
+      hws.getColumn(compColDPct(i)).width  = 9;
+    }
+    hws.getColumn(COL_CHEAPEST).width = 18;
+    hws.getColumn(COL_FLAG).width     = 7;
+
+    // ── Row 1: Title ──
+    hws.getRow(1).height = 30;
+    hws.mergeCells(1, 1, 1, TOTAL_COLS);
+    const htitle = hws.getCell(1, 1);
+    htitle.value     = "DICKER DATA — COMPETITOR PRICE COMPARISON";
+    htitle.font      = fnt({ bold: true, size: 14, color: { argb: WHITE } });
+    htitle.fill      = solid(DARK);
+    htitle.alignment = { horizontal: "center", vertical: "middle" };
+
+    // ── Row 3: Freshness label ──
+    hws.mergeCells(3, 1, 3, TOTAL_COLS);
+    const hfpLabel = hws.getCell(3, 1);
+    hfpLabel.value = "PRICE FILE FRESHNESS — how current each distributor's feed is";
+    hfpLabel.font  = fnt({ bold: true, color: { argb: DARK } });
+
+    // ── Row 4: Freshness column headers ──
+    ["Distributor", "Price file date", "Days old", "Status"].forEach((h, i) => {
+      const c = hws.getCell(4, i + 1);
+      c.value     = h;
+      c.font      = fnt({ bold: true, size: 9, color: { argb: WHITE } });
+      c.fill      = solid(GREY);
+      c.alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    // ── Rows 5+: Per-distributor freshness ──
+    const hFreshnessLines = [
+      { label: "Dicker Data", dist: dickerDist },
+      ...competitors.map((d) => ({ label: d.name, dist: d })),
+    ];
+    hFreshnessLines.forEach(({ label, dist }, idx) => {
+      const rn = 5 + idx;
+      const aCell = hws.getCell(rn, 1);
+      aCell.value = label;
+      aCell.font  = fnt({ bold: true, color: { argb: DARK } });
+      const bCell    = hws.getCell(rn, 2);
+      const lastDate = dist ? freshnessMap.get(dist.id) : null;
+      if (lastDate) {
+        bCell.value  = new Date(lastDate + "T00:00:00");
+        bCell.numFmt = "dd/mm/yyyy";
+      } else {
+        bCell.value = "No data";
+      }
+      const cCell = hws.getCell(rn, 3);
+      cCell.value     = { formula: `TODAY()-B${rn}` };
+      cCell.numFmt    = "0";
+      cCell.alignment = { horizontal: "center" };
+      const dCell = hws.getCell(rn, 4);
+      dCell.value = { formula: `IF(C${rn}<=1,"current",IF(C${rn}<=3,"ageing — consider refresh","STALE — upload a new file"))` };
+      dCell.font  = fnt({ bold: true });
+    });
+    const hFreshnessEnd = 4 + hFreshnessLines.length;
+    hws.addConditionalFormatting({
+      ref: `D5:D${hFreshnessEnd}`,
+      rules: [
+        { type: "expression", priority: 1, formulae: [`$C5>3`],             style: { font: { bold: true, color: { argb: RED_C   } } } },
+        { type: "expression", priority: 2, formulae: [`AND($C5>1,$C5<=3)`], style: { font: { bold: true, color: { argb: AMBER_C } } } },
+        { type: "expression", priority: 3, formulae: [`$C5<=1`],            style: { font: { bold: true, color: { argb: GREEN_C } } } },
+      ],
+    });
+
+    // ── Distributor group header row ──
+    const GRP_ROW = hFreshnessEnd + 2;
+    hws.getRow(GRP_ROW).height = 18;
+
+    // Dicker group header (cols 4–5)
+    hws.mergeCells(GRP_ROW, 4, GRP_ROW, 5);
+    const dkGrpCell = hws.getCell(GRP_ROW, 4);
+    dkGrpCell.value     = dickerDist ? `${dickerDist.name} ★` : "Dicker Data ★";
+    dkGrpCell.font      = fnt({ bold: true, color: { argb: WHITE } });
+    dkGrpCell.fill      = solid(DARK);
+    dkGrpCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Competitor group headers
+    competitors.forEach((comp, i) => {
+      const cStart = compColSoh(i);
+      const cEnd   = compColDPct(i);
+      hws.mergeCells(GRP_ROW, cStart, GRP_ROW, cEnd);
+      const gc = hws.getCell(GRP_ROW, cStart);
+      gc.value     = comp.name;
+      gc.font      = fnt({ bold: true, color: { argb: WHITE } });
+      gc.fill      = solid(TEAL);
+      gc.alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    // ── Column sub-header row ──
+    const HDR_ROW = GRP_ROW + 1;
+    hws.getRow(HDR_ROW).height = 16;
+
+    const subHdrs: Array<{ col: number; label: string }> = [
+      { col: 1, label: "VPN" },
+      { col: 2, label: "Brand" },
+      { col: 3, label: "Description" },
+      { col: 4, label: "SOH" },
+      { col: 5, label: "Price (ex)" },
+    ];
+    for (let i = 0; i < numComp; i++) {
+      subHdrs.push({ col: compColSoh(i),   label: "SOH"       });
+      subHdrs.push({ col: compColPrice(i),  label: "Price (ex)" });
+      subHdrs.push({ col: compColDelta(i),  label: "Δ$ vs Dicker" });
+      subHdrs.push({ col: compColDPct(i),   label: "Δ %"       });
+    }
+    subHdrs.push({ col: COL_CHEAPEST, label: "Cheapest" });
+    subHdrs.push({ col: COL_FLAG,     label: "DD ↑" });
+
+    subHdrs.forEach(({ col, label }) => {
+      const c = hws.getCell(HDR_ROW, col);
+      c.value     = label;
+      c.font      = fnt({ bold: true, color: { argb: WHITE } });
+      c.fill      = solid(DARK);
+      c.alignment = { horizontal: col >= 4 ? "center" : "left", vertical: "middle", indent: col < 4 ? 1 : 0 };
+    });
+
+    // Freeze top rows + VPN/Brand/Description columns
+    hws.views = [{ showGridLines: true, state: "frozen", xSplit: 3, ySplit: HDR_ROW }];
+
+    // ── Data rows ──
+    const DATA_START = HDR_ROW + 1;
+    let rowIdx = DATA_START;
+    const deltaColRefs: string[] = [];   // collect Δ$ column letters for CF
+
+    for (let i = 0; i < numComp; i++) {
+      deltaColRefs.push(colLetter(compColDelta(i)));
+    }
+
+    for (const p of sortedH) {
+      const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
+      const dkSOH   = dkSnap?.soh ?? null;
+      const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+
+      // Compute competitor data + find cheapest
+      let cheapestName:  string | null = null;
+      let cheapestPrice: number | null = null;
+      const compValues: Array<{ soh: number | null; price: number | null; delta: number | null; deltaPct: number | null }> = [];
+
+      for (const comp of competitors) {
+        const snap  = snapMap.get(`${p.id}:${comp.id}`);
+        const price = snap?.sell_price != null ? parseFloat(snap.sell_price) : null;
+        const soh   = snap?.soh ?? null;
+        let delta:    number | null = null;
+        let deltaPct: number | null = null;
+        if (price != null && dkPrice != null) {
+          delta    = price - dkPrice;
+          deltaPct = dkPrice !== 0 ? ((price - dkPrice) / dkPrice) * 100 : null;
+        }
+        if (price != null && (cheapestPrice == null || price < cheapestPrice)) {
+          cheapestPrice = price;
+          cheapestName  = comp.name;
+        }
+        compValues.push({ soh, price, delta, deltaPct });
+      }
+
+      const dickerMostExp = dkPrice != null && cheapestPrice != null && dkPrice > cheapestPrice;
+
+      const row = hws.getRow(rowIdx);
+
+      // Fixed cols
+      const vpnCell = row.getCell(1);
+      vpnCell.value = p.vpnNormalized;
+      vpnCell.font  = fnt({ color: { argb: DARK } });
+
+      row.getCell(2).value = p.brand;
+      row.getCell(2).font  = fnt({ color: { argb: DARK } });
+
+      row.getCell(3).value = p.description;
+      row.getCell(3).font  = fnt({ color: { argb: DARK } });
+
+      const dkSohCell = row.getCell(4);
+      dkSohCell.value     = dkSOH;
+      dkSohCell.font      = fnt({ bold: true, color: { argb: DARK } });
+      dkSohCell.alignment = { horizontal: "center" };
+
+      const dkPriceCell = row.getCell(5);
+      dkPriceCell.value     = dkPrice;
+      dkPriceCell.font      = fnt({ bold: true, color: { argb: DARK } });
+      dkPriceCell.numFmt    = "$#,##0.00";
+      dkPriceCell.alignment = { horizontal: "center" };
+
+      // Competitor cols
+      compValues.forEach((cv, i) => {
+        const sohCell = row.getCell(compColSoh(i));
+        sohCell.value     = cv.soh;
+        sohCell.alignment = { horizontal: "center" };
+        sohCell.font      = fnt({ color: { argb: DARK } });
+
+        const priceCell = row.getCell(compColPrice(i));
+        priceCell.value     = cv.price;
+        priceCell.numFmt    = "$#,##0.00";
+        priceCell.alignment = { horizontal: "center" };
+        priceCell.font      = fnt({ color: { argb: DARK } });
+
+        const deltaCell = row.getCell(compColDelta(i));
+        deltaCell.value     = cv.delta;
+        deltaCell.numFmt    = `[Red]-$#,##0.00;[Color10]+$#,##0.00`;
+        deltaCell.alignment = { horizontal: "center" };
+        deltaCell.font      = fnt({ bold: true, color: { argb: cv.delta == null ? DARK : cv.delta < 0 ? RED_C : GREEN_C } });
+
+        const dpctCell = row.getCell(compColDPct(i));
+        dpctCell.value     = cv.deltaPct != null ? cv.deltaPct / 100 : null;
+        dpctCell.numFmt    = `+0.0%;-0.0%;`;
+        dpctCell.alignment = { horizontal: "center" };
+        dpctCell.font      = fnt({ color: { argb: cv.deltaPct == null ? DARK : cv.deltaPct < 0 ? RED_C : GREEN_C } });
+      });
+
+      // Cheapest + flag
+      row.getCell(COL_CHEAPEST).value = cheapestName;
+      row.getCell(COL_CHEAPEST).font  = fnt({ color: { argb: TEAL } });
+
+      if (dickerMostExp) {
+        const flagCell = row.getCell(COL_FLAG);
+        flagCell.value     = "⚑";
+        flagCell.font      = fnt({ bold: true, color: { argb: RED_C } });
+        flagCell.alignment = { horizontal: "center" };
+      }
+
+      // Zebra stripe
+      if ((rowIdx - DATA_START) % 2 === 1) {
+        for (let col = 1; col <= TOTAL_COLS; col++) {
+          const existing = row.getCell(col).fill;
+          if (!existing || (existing as ExcelJS.FillPattern).fgColor?.argb === WHITE) {
+            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+          }
+        }
+      }
+
+      rowIdx++;
+    }
+
+    // Stream response
+    const brandLabel = selectedBrands.length > 0 ? selectedBrands.join("_") : "ALL";
+    const today      = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const hfname     = `Compare_Horizontal_${brandLabel}_${today}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${hfname}"`);
+    await hwb.xlsx.write(res);
+    res.end();
+    return;
+  }
+
   // ── 5. Build workbook ────────────────────────────────────────
   const wb = new ExcelJS.Workbook();
   wb.creator = "DistiBench";
