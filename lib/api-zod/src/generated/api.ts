@@ -471,7 +471,9 @@ export const CommitUploadResponse = zod.object({
 export const GetComparisonQueryParams = zod.object({
   "brand": zod.coerce.string().optional(),
   "distributorId": zod.coerce.number().optional(),
-  "search": zod.coerce.string().optional()
+  "search": zod.coerce.string().optional(),
+  "page": zod.coerce.number().optional(),
+  "pageSize": zod.coerce.number().optional()
 })
 
 export const GetComparisonResponse = zod.object({
@@ -505,7 +507,10 @@ export const GetComparisonResponse = zod.object({
   "createdAt": zod.string(),
   "lastUploadAt": zod.string().nullish(),
   "lastUploadStatus": zod.string().nullish()
-}))
+})),
+  "total": zod.number(),
+  "page": zod.number().nullish(),
+  "pageSize": zod.number().nullish()
 })
 
 

@@ -31,7 +31,7 @@ function buildSharedCtes(): string {
         ss.product_id,
         ss.distributor_id,
         ss.sell_price::numeric AS sell_price,
-        CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh,
+        ss.soh,
         ss.soo,
         ss.snapshot_date,
         ss.category,

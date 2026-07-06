@@ -10,4 +10,6 @@ export type GetComparisonParams = {
 brand?: string;
 distributorId?: number;
 search?: string;
+page?: number;
+pageSize?: number;
 };

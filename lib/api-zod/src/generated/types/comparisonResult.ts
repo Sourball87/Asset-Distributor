@@ -11,4 +11,9 @@ import type { Distributor } from './distributor';
 export interface ComparisonResult {
   rows: ComparisonRow[];
   distributors: Distributor[];
+  total: number;
+  /** @nullable */
+  page?: number | null;
+  /** @nullable */
+  pageSize?: number | null;
 }

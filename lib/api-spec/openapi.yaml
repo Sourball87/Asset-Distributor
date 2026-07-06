@@ -609,6 +609,16 @@ paths:
           required: false
           schema:
             type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
       responses:
         "200":
           description: Comparison rows
@@ -1017,7 +1027,7 @@ components:
 
     ComparisonResult:
       type: object
-      required: [rows, distributors]
+      required: [rows, distributors, total]
       properties:
         rows:
           type: array
@@ -1027,6 +1037,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Distributor"
+        total:
+          type: integer
+        page:
+          type: ["integer", "null"]
+        pageSize:
+          type: ["integer", "null"]
 
     # --- Dashboard ---
     DistributorCard:

@@ -18,8 +18,6 @@ const WHITE   = "FFFFFFFF";
 const IN_BORDER  = "FFD9C97A";
 const BLK_BORDER = "FFC7CCD4";
 
-const DICKER_SOH_SENTINEL = 999_999_999;
-
 function solid(argb: string): ExcelJS.Fill {
   return { type: "pattern", pattern: "solid", fgColor: { argb } };
 }
@@ -126,15 +124,15 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     if (a.brand > b.brand) return 1;
     const aSnap = dickerDist ? snapMap.get(`${a.id}:${dickerDist.id}`) : undefined;
     const bSnap = dickerDist ? snapMap.get(`${b.id}:${dickerDist.id}`) : undefined;
-    const aSOH  = (aSnap?.soh === DICKER_SOH_SENTINEL ? null : (aSnap?.soh ?? null)) ?? -1;
-    const bSOH  = (bSnap?.soh === DICKER_SOH_SENTINEL ? null : (bSnap?.soh ?? null)) ?? -1;
+    const aSOH  = (aSnap?.soh ?? null) ?? -1;
+    const bSOH  = (bSnap?.soh ?? null) ?? -1;
     return bSOH - aSOH;
   });
 
   for (const p of sortedProducts) {
     const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
     const rawSoh  = dkSnap?.soh ?? null;
-    const dkSOH   = rawSoh === DICKER_SOH_SENTINEL ? null : rawSoh;
+    const dkSOH   = rawSoh;
     const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
     const compCols = competitorMeta.flatMap((c) => {
       const snap = snapMap.get(`${p.id}:${c.id}`);

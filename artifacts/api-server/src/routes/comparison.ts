@@ -1,150 +1,182 @@
 import { Router } from "express";
-import { db, distributorsTable, productsTable, stockSnapshotsTable, uploadsTable } from "@workspace/db";
-import { eq, and, sql, ilike, or } from "drizzle-orm";
+import { pool } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 
 const router = Router();
 
 router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
-  const { brand, distributorId, search } = req.query as Record<string, string | undefined>;
+  const brand    = (req.query.brand  as string | undefined)?.trim().toUpperCase() || null;
+  const search   = (req.query.search as string | undefined)?.trim() || null;
+  const page     = Math.max(1, parseInt((req.query.page     as string) ?? "1") || 1);
+  const pageSize = Math.max(0, parseInt((req.query.pageSize as string) ?? "0") || 0);
 
-  const distributors = await db.select().from(distributorsTable).orderBy(distributorsTable.name);
-  const baseline = distributors.find((d) => d.isBaseline);
+  const searchPattern = search ? `%${search}%` : null;
+  const limitVal  = pageSize > 0 ? pageSize : null;   // null → LIMIT NULL → no cap
+  const offsetVal = pageSize > 0 ? (page - 1) * pageSize : 0;
 
-  // Get latest snapshot per product per distributor using a subquery
-  const latestSnapshots = await db.execute(sql`
-    SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
-      ss.id,
-      ss.product_id,
-      ss.distributor_id,
-      ss.upload_id,
-      ss.snapshot_date,
-      ss.sell_price,
-      CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh,
-      ss.soo
-    FROM stock_snapshots ss
-    ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
-  `);
-
-  // Get previous snapshots for movement calc
-  const prevSnapshots = await db.execute(sql`
-    SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
-      ss.product_id,
-      ss.distributor_id,
-      ss.snapshot_date as prev_date,
-      CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS prev_soh
-    FROM stock_snapshots ss
-    WHERE NOT EXISTS (
-      SELECT 1 FROM stock_snapshots newer
-      WHERE newer.product_id = ss.product_id
-        AND newer.distributor_id = ss.distributor_id
-        AND newer.snapshot_date > ss.snapshot_date
-    )
-    ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date ASC, ss.id ASC
-  `);
-
-  type SnapshotRow = {
-    id: number;
-    product_id: number;
-    distributor_id: number;
-    upload_id: number;
-    snapshot_date: string;
-    sell_price: string | null;
-    soh: number | null;
-    soo: number | null;
+  // ── Single CTE query ────────────────────────────────────────────────────
+  type QueryRow = {
+    product_id:     number;
+    vpn_normalized: string;
+    vpn_display:    string;
+    brand:          string;
+    description:    string;
+    total_count:    number;
+    distributor_data: Array<{
+      distributorId:   number;
+      distributorName: string;
+      isBaseline:      boolean;
+      sellPrice:       string | null;
+      soh:             number | null;
+      soo:             number | null;
+      prevSoh:         number | null;
+      prevDate:        string | null;
+    }>;
   };
 
-  type PrevRow = {
-    product_id: number;
-    distributor_id: number;
-    prev_date: string;
-    prev_soh: number | null;
-  };
+  const { rows } = await pool.query<QueryRow>(`
+    WITH
+      filtered_products AS (
+        SELECT p.id, p.vpn_normalized, p.vpn_display, p.brand, p.description
+        FROM products p
+        WHERE ($1::text IS NULL OR p.brand = $1)
+          AND ($2::text IS NULL OR (
+               p.vpn_normalized ILIKE $2
+            OR p.vpn_display    ILIKE $2
+            OR p.description    ILIKE $2
+          ))
+      ),
+      total AS (
+        SELECT COUNT(*)::int AS cnt FROM filtered_products
+      ),
+      paged_products AS (
+        SELECT fp.*
+        FROM filtered_products fp
+        ORDER BY fp.brand, fp.vpn_normalized
+        LIMIT $3 OFFSET $4
+      ),
+      latest_ss AS (
+        SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
+          ss.product_id,
+          ss.distributor_id,
+          ss.sell_price::numeric AS sell_price,
+          ss.soh,
+          ss.soo,
+          ss.snapshot_date,
+          ss.id AS ss_id
+        FROM stock_snapshots ss
+        WHERE ss.product_id IN (SELECT id FROM paged_products)
+        ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
+      ),
+      prev_ss AS (
+        SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
+          ss.product_id,
+          ss.distributor_id,
+          ss.soh          AS prev_soh,
+          ss.snapshot_date AS prev_date
+        FROM stock_snapshots ss
+        JOIN latest_ss l ON l.product_id     = ss.product_id
+                        AND l.distributor_id = ss.distributor_id
+        WHERE ss.snapshot_date < l.snapshot_date
+           OR (ss.snapshot_date = l.snapshot_date AND ss.id < l.ss_id)
+        ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
+      )
+    SELECT
+      pp.id            AS product_id,
+      pp.vpn_normalized,
+      pp.vpn_display,
+      pp.brand,
+      pp.description,
+      t.cnt            AS total_count,
+      json_agg(
+        json_build_object(
+          'distributorId',   d.id,
+          'distributorName', d.name,
+          'isBaseline',      d.is_baseline,
+          'sellPrice',       l.sell_price,
+          'soh',             l.soh,
+          'soo',             l.soo,
+          'prevSoh',         pr.prev_soh,
+          'prevDate',        pr.prev_date
+        ) ORDER BY d.is_baseline DESC, d.name
+      ) AS distributor_data
+    FROM paged_products pp
+    CROSS JOIN distributors d
+    LEFT JOIN latest_ss l  ON l.product_id  = pp.id AND l.distributor_id  = d.id
+    LEFT JOIN prev_ss   pr ON pr.product_id = pp.id AND pr.distributor_id = d.id
+    CROSS JOIN total t
+    GROUP BY pp.id, pp.vpn_normalized, pp.vpn_display, pp.brand, pp.description, t.cnt
+    ORDER BY pp.brand, pp.vpn_normalized
+  `, [brand, searchPattern, limitVal, offsetVal]);
 
-  const snapshotMap = new Map<string, SnapshotRow>();
-  for (const row of latestSnapshots.rows as SnapshotRow[]) {
-    snapshotMap.set(`${row.product_id}:${row.distributor_id}`, row);
-  }
+  // ── Distributor metadata (tiny table, fine as second query) ─────────────
+  type DistRow = { id: number; name: string; is_baseline: boolean; staleness_threshold_days: number; created_at: Date };
+  const { rows: distRows } = await pool.query<DistRow>(
+    `SELECT id, name, is_baseline, staleness_threshold_days, created_at
+     FROM distributors ORDER BY is_baseline DESC, name`,
+  );
 
-  // Build map of second-latest for movement
-  const allSnapsByProductDisti = new Map<string, SnapshotRow[]>();
-  const allSnapshotsRaw = await db.execute(sql`
-    SELECT ss.product_id, ss.distributor_id, ss.snapshot_date, CASE WHEN ss.soh = 999999999 THEN 0 ELSE ss.soh END AS soh, ss.upload_id, ss.id, ss.sell_price, ss.soo
-    FROM stock_snapshots ss
-    ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC
-  `);
+  const totalCount = rows.length > 0 ? rows[0].total_count : 0;
 
-  for (const row of allSnapshotsRaw.rows as SnapshotRow[]) {
-    const key = `${row.product_id}:${row.distributor_id}`;
-    if (!allSnapsByProductDisti.has(key)) allSnapsByProductDisti.set(key, []);
-    allSnapsByProductDisti.get(key)!.push(row);
-  }
+  // ── Assemble response rows (cheap arithmetic only) ───────────────────────
+  const comparisonRows = rows.map((row) => {
+    const distData = row.distributor_data ?? [];
 
-  // Products
-  let products = await db.select().from(productsTable).orderBy(productsTable.brand, productsTable.vpnNormalized);
-
-  // Filter
-  if (brand) products = products.filter((p) => p.brand === brand);
-  if (search) {
-    const q = search.toLowerCase();
-    products = products.filter(
-      (p) => p.vpnNormalized.toLowerCase().includes(q) || p.vpnDisplay.toLowerCase().includes(q) || p.description.toLowerCase().includes(q),
-    );
-  }
-
-  const rows = products.map((product) => {
+    // Find baseline (Dicker) sell price — comes first because ORDER BY is_baseline DESC
     let dickerPrice: number | null = null;
-    const distributorEntries = distributors.map((d) => {
-      const snap = snapshotMap.get(`${product.id}:${d.id}`);
-      const allSnaps = allSnapsByProductDisti.get(`${product.id}:${d.id}`) ?? [];
-      const isNew = allSnaps.length <= 1;
+    for (const d of distData) {
+      if (d.isBaseline && d.sellPrice != null) {
+        dickerPrice = Number(d.sellPrice);
+        break;
+      }
+    }
 
-      let movement: number | null = null;
+    let cheapestCompetitorId:    number | null = null;
+    let cheapestCompetitorPrice: number | null = null;
+
+    const distributors = distData.map((d) => {
+      const sellPrice = d.sellPrice != null ? Number(d.sellPrice) : null;
+
+      // Movement vs previous snapshot
+      let movement:          number | null = null;
       let movementSinceDate: string | null = null;
+      if (d.prevDate !== null && d.soh != null && d.prevSoh != null) {
+        movement          = d.soh - d.prevSoh;
+        movementSinceDate = d.prevDate as string;
+      }
 
-      if (!isNew && allSnaps.length >= 2) {
-        const latest = allSnaps[0];
-        const previous = allSnaps[1];
-        if (latest.soh != null && previous.soh != null) {
-          movement = Number(latest.soh) - Number(previous.soh);
-          movementSinceDate = previous.snapshot_date;
+      const isNew = d.prevDate === null;
+
+      let priceDelta:    number | null = null;
+      let priceDeltaPct: number | null = null;
+      if (!d.isBaseline && sellPrice != null && dickerPrice != null) {
+        priceDelta    = sellPrice - dickerPrice;
+        priceDeltaPct = dickerPrice !== 0
+          ? ((sellPrice - dickerPrice) / dickerPrice) * 100
+          : null;
+      }
+
+      if (!d.isBaseline && sellPrice != null) {
+        if (cheapestCompetitorPrice == null || sellPrice < cheapestCompetitorPrice) {
+          cheapestCompetitorPrice = sellPrice;
+          cheapestCompetitorId   = d.distributorId;
         }
       }
 
-      const sellPrice = snap?.sell_price != null ? parseFloat(snap.sell_price) : null;
-      if (d.isBaseline && sellPrice != null) dickerPrice = sellPrice;
-
       return {
-        distributorId: d.id,
-        distributorName: d.name,
-        isBaseline: d.isBaseline,
+        distributorId:    d.distributorId,
+        distributorName:  d.distributorName,
+        isBaseline:       d.isBaseline,
         sellPrice,
-        soh: snap?.soh ?? null,
-        soo: snap?.soo ?? null,
+        soh:              d.soh,
+        soo:              d.soo,
         movement,
         movementSinceDate,
         isNew,
-        priceDelta: null as number | null,
-        priceDeltaPct: null as number | null,
+        priceDelta,
+        priceDeltaPct,
       };
     });
-
-    // Compute price deltas vs baseline
-    let cheapestCompetitorId: number | null = null;
-    let cheapestCompetitorPrice: number | null = null;
-
-    for (const entry of distributorEntries) {
-      if (!entry.isBaseline && entry.sellPrice != null && dickerPrice != null) {
-        entry.priceDelta = entry.sellPrice - dickerPrice;
-        entry.priceDeltaPct = dickerPrice !== 0 ? ((entry.sellPrice - dickerPrice) / dickerPrice) * 100 : null;
-      }
-      if (!entry.isBaseline && entry.sellPrice != null) {
-        if (cheapestCompetitorPrice == null || entry.sellPrice < cheapestCompetitorPrice) {
-          cheapestCompetitorPrice = entry.sellPrice;
-          cheapestCompetitorId = entry.distributorId;
-        }
-      }
-    }
 
     const dickerIsMostExpensive =
       dickerPrice != null &&
@@ -152,18 +184,32 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       dickerPrice > cheapestCompetitorPrice;
 
     return {
-      productId: product.id,
-      vpnNormalized: product.vpnNormalized,
-      vpnDisplay: product.vpnDisplay,
-      brand: product.brand,
-      description: product.description,
-      distributors: distributorEntries,
+      productId:            row.product_id,
+      vpnNormalized:        row.vpn_normalized,
+      vpnDisplay:           row.vpn_display,
+      brand:                row.brand,
+      description:          row.description,
+      distributors,
       cheapestCompetitorId,
       dickerIsMostExpensive,
     };
   });
 
-  res.json({ rows, distributors: distributors.map((d) => ({ id: d.id, name: d.name, isBaseline: d.isBaseline, stalenessThresholdDays: d.stalenessThresholdDays, createdAt: d.createdAt.toISOString(), lastUploadAt: null, lastUploadStatus: null })) });
+  res.json({
+    rows: comparisonRows,
+    distributors: distRows.map((d) => ({
+      id:                     d.id,
+      name:                   d.name,
+      isBaseline:             d.is_baseline,
+      stalenessThresholdDays: d.staleness_threshold_days,
+      createdAt:              d.created_at.toISOString(),
+      lastUploadAt:           null,
+      lastUploadStatus:       null,
+    })),
+    total:    totalCount,
+    page,
+    pageSize: pageSize || null,
+  });
 });
 
 export default router;

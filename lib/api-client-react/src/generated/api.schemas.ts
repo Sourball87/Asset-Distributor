@@ -275,6 +275,11 @@ export interface ComparisonRow {
 export interface ComparisonResult {
   rows: ComparisonRow[];
   distributors: Distributor[];
+  total: number;
+  /** @nullable */
+  page?: number | null;
+  /** @nullable */
+  pageSize?: number | null;
 }
 
 export type DistributorCardFreshness = typeof DistributorCardFreshness[keyof typeof DistributorCardFreshness];
@@ -326,5 +331,7 @@ export type GetComparisonParams = {
 brand?: string;
 distributorId?: number;
 search?: string;
+page?: number;
+pageSize?: number;
 };
 

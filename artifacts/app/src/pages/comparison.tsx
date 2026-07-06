@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AgGridReact } from "ag-grid-react";
 import { ModuleRegistry, AllCommunityModule, themeQuartz } from "ag-grid-community";
 import type { ColDef, ColGroupDef, RowClassParams, ValueFormatterParams, CellClassParams, CellStyle } from "ag-grid-community";
@@ -52,9 +52,6 @@ function fmtSoh(v: number | null | undefined): string {
 function fmtDelta(v: number | null | undefined): string {
   if (v == null) return "—";
   const abs = Math.abs(v).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  // priceDelta = competitor - dicker
-  // negative = competitor cheaper (Dicker overpriced) → show with ▲ (Dicker is higher)
-  // positive = competitor dearer → show with ▼ (Dicker is lower)
   return v < 0 ? `-$${abs} ▲` : `+$${abs} ▼`;
 }
 
@@ -88,9 +85,9 @@ function flattenRows(rows: ComparisonRow[]): FlatRow[] {
       cheapestCompetitorId: row.cheapestCompetitorId ?? null,
     };
     for (const d of row.distributors) {
-      flat[`d${d.distributorId}_price`] = d.sellPrice ?? null;
-      flat[`d${d.distributorId}_soh`] = d.soh ?? null;
-      flat[`d${d.distributorId}_delta`] = d.priceDelta ?? null;
+      flat[`d${d.distributorId}_price`]    = d.sellPrice ?? null;
+      flat[`d${d.distributorId}_soh`]      = d.soh ?? null;
+      flat[`d${d.distributorId}_delta`]    = d.priceDelta ?? null;
       flat[`d${d.distributorId}_deltaPct`] = d.priceDeltaPct ?? null;
       flat[`d${d.distributorId}_cheapest`] = row.cheapestCompetitorId === d.distributorId;
     }
@@ -222,15 +219,24 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
 export default function Comparison() {
   const [brandFilter, setBrandFilter] = useState<string>("all");
   const [onlyMostExpensive, setOnlyMostExpensive] = useState(false);
-  const gridRef = useRef<AgGridReact>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchParam, setSearchParam] = useState("");
 
   const { data: brandsData } = useListBrands();
   const brands = brandsData ?? [];
 
-  const queryParams = useMemo(
-    () => (brandFilter && brandFilter !== "all" ? { brand: brandFilter } : undefined),
-    [brandFilter],
-  );
+  // Debounce search: only send to API 400 ms after the user stops typing
+  useEffect(() => {
+    const t = setTimeout(() => setSearchParam(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const queryParams = useMemo(() => {
+    const p: Record<string, string> = {};
+    if (brandFilter && brandFilter !== "all") p.brand = brandFilter;
+    if (searchParam) p.search = searchParam;
+    return Object.keys(p).length ? p : undefined;
+  }, [brandFilter, searchParam]);
 
   const { data, isLoading, isError } = useGetComparison(queryParams, {
     query: { staleTime: 60_000, queryKey: ["comparison", queryParams] },
@@ -251,11 +257,7 @@ export default function Comparison() {
     [],
   );
 
-  const handleQuickFilter = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    gridRef.current?.api?.setGridOption("quickFilterText", e.target.value);
-  }, []);
-
-  const totalRows = rowData.length;
+  const total = data?.total ?? null;
   const expensiveRows = useMemo(() => rowData.filter((r) => r.dickerIsMostExpensive).length, [rowData]);
   const baselineDist = distributors.find((d) => d.isBaseline);
 
@@ -267,7 +269,7 @@ export default function Comparison() {
           <h1 className="text-xl font-bold tracking-tight">Comparison Grid</h1>
           {data && !isLoading && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              {totalRows.toLocaleString()} products
+              {(total ?? rowData.length).toLocaleString()} products
               {baselineDist && <span> · Baseline: {baselineDist.name} ★</span>}
               {expensiveRows > 0 && (
                 <span className="text-red-600 font-medium">
@@ -296,7 +298,8 @@ export default function Comparison() {
         </Select>
 
         <Input
-          onChange={handleQuickFilter}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Search VPN or description…"
           className="h-8 w-60 text-xs rounded-sm font-mono"
         />
@@ -330,7 +333,6 @@ export default function Comparison() {
       {/* Grid */}
       <div className="flex-1 min-h-0">
         <AgGridReact
-          ref={gridRef}
           theme={gridTheme}
           columnDefs={colDefs}
           rowData={rowData}
