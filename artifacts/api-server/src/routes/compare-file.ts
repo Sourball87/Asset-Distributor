@@ -247,12 +247,15 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     const GRP_ROW = INSTR_ROW + 2;
     hws.getRow(GRP_ROW).height = 18;
 
+    const grpBorderLeft: Partial<ExcelJS.Border> = { style: "medium", color: { argb: BLK_BORDER } };
+
     hws.mergeCells(GRP_ROW, 4, GRP_ROW, 5);
     const dkGrpCell = hws.getCell(GRP_ROW, 4);
     dkGrpCell.value     = dickerDist ? `${dickerDist.name} ★` : "Dicker Data ★";
     dkGrpCell.font      = fnt({ bold: true, color: { argb: WHITE } });
     dkGrpCell.fill      = solid(DARK);
     dkGrpCell.alignment = { horizontal: "center", vertical: "middle" };
+    dkGrpCell.border    = { left: grpBorderLeft };
 
     competitors.forEach((comp, i) => {
       hws.mergeCells(GRP_ROW, compColSoh(i), GRP_ROW, compColDPct(i));
@@ -261,7 +264,11 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       gc.font      = fnt({ bold: true, color: { argb: WHITE } });
       gc.fill      = solid(TEAL);
       gc.alignment = { horizontal: "center", vertical: "middle" };
+      gc.border    = { left: grpBorderLeft };
     });
+
+    // Left border on Cheapest column in GRP_ROW (no label, just the divider)
+    hws.getCell(GRP_ROW, COL_CHEAPEST).border = { left: grpBorderLeft };
 
     // ── HDR_ROW: Sub-header row ──
     const HDR_ROW = GRP_ROW + 1;
@@ -283,12 +290,16 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     subHdrs.push({ col: COL_CHEAPEST, label: "Cheapest" });
     subHdrs.push({ col: COL_FLAG,     label: "DD ↑" });
 
+    // Columns that start a new distributor group — get a medium left border
+    const grpDividerCols = new Set([4, ...competitors.map((_, i) => compColSoh(i)), COL_CHEAPEST]);
+
     subHdrs.forEach(({ col, label }) => {
       const c = hws.getCell(HDR_ROW, col);
       c.value     = label;
       c.font      = fnt({ bold: true, color: { argb: WHITE } });
       c.fill      = solid(DARK);
       c.alignment = { horizontal: col >= 4 ? "center" : "left", vertical: "middle", indent: col < 4 ? 1 : 0 };
+      if (grpDividerCols.has(col)) c.border = { left: grpBorderLeft };
     });
 
     // Freeze first 3 cols (paste/brand/desc) and all header rows
@@ -298,6 +309,8 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     const DATA_START = HDR_ROW + 1;
     const M          = 300;
     const thinIN     = thin(IN_BORDER);
+    // Medium left border for group dividers — defined once, reused in every data row
+    const grpLeft: Partial<ExcelJS.Border> = { style: "medium", color: { argb: BLK_BORDER } };
 
     for (let k = 0; k < M; k++) {
       const r = DATA_START + k;
@@ -325,15 +338,17 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       descCell.value = { formula: `${g}IFERROR(INDEX(DATA!$C:$C,${mf}),"— not found —"))` };
       descCell.font  = fnt({ color: { argb: DARK } });
 
-      // Col D — Dicker SOH
+      // Col D — Dicker SOH (left border = start of Dicker group)
       const dkSohCell = hws.getCell(r, 4);
       dkSohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$D:$D,${mf}),""))` };
       dkSohCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkSohCell.alignment = { horizontal: "center" };
+      dkSohCell.border    = { left: grpLeft };
 
       // Col E — Dicker Price
+      // Guard: if DATA returns 0 (no data), show "not listed"
       const dkPriceCell = hws.getCell(r, 5);
-      dkPriceCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$E:$E,${mf}),""))` };
+      dkPriceCell.value     = { formula: `${g}IFERROR(IF(INDEX(DATA!$E:$E,${mf})=0,"not listed",INDEX(DATA!$E:$E,${mf})),"not listed"))` };
       dkPriceCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkPriceCell.numFmt    = "$#,##0.00";
       dkPriceCell.alignment = { horizontal: "center" };
@@ -346,29 +361,30 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         const priceLtr     = colLetter(compColPrice(i));
         compPriceRefs.push(`${priceLtr}${r}`);
 
-        // SOH
+        // SOH (left border = start of this competitor's group)
         const sohCell = hws.getCell(r, compColSoh(i));
         sohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$${dataSOHLtr}:$${dataSOHLtr},${mf}),""))` };
         sohCell.font      = fnt({ color: { argb: DARK } });
         sohCell.alignment = { horizontal: "center" };
+        sohCell.border    = { left: grpLeft };
 
-        // Price
+        // Price — guard $0 as "not listed"
         const priceCell = hws.getCell(r, compColPrice(i));
-        priceCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf}),""))` };
+        priceCell.value     = { formula: `${g}IFERROR(IF(INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf})=0,"not listed",INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf})),"not listed"))` };
         priceCell.font      = fnt({ color: { argb: DARK } });
         priceCell.numFmt    = "$#,##0.00";
         priceCell.alignment = { horizontal: "center" };
 
-        // Δ$ — competitor price minus Dicker price
+        // Δ$ — competitor price minus Dicker price (ISNUMBER guards handle "not listed" text)
         const deltaCell = hws.getCell(r, compColDelta(i));
-        deltaCell.value     = { formula: `IF(OR(E${r}="",${priceLtr}${r}=""),"",${priceLtr}${r}-E${r})` };
+        deltaCell.value     = { formula: `IF(OR(NOT(ISNUMBER(E${r})),NOT(ISNUMBER(${priceLtr}${r}))),"",${priceLtr}${r}-E${r})` };
         deltaCell.numFmt    = `$#,##0.00`;
         deltaCell.alignment = { horizontal: "center" };
         deltaCell.font      = fnt({ color: { argb: DARK } });
 
         // Δ% — (competitor - dicker) / dicker
         const dpctCell = hws.getCell(r, compColDPct(i));
-        dpctCell.value     = { formula: `IF(OR(E${r}="",${priceLtr}${r}="",E${r}=0),"",( ${priceLtr}${r}-E${r})/E${r})` };
+        dpctCell.value     = { formula: `IF(OR(NOT(ISNUMBER(E${r})),NOT(ISNUMBER(${priceLtr}${r})),E${r}=0),"",( ${priceLtr}${r}-E${r})/E${r})` };
         dpctCell.numFmt    = `+0.0%;-0.0%;`;
         dpctCell.alignment = { horizontal: "center" };
         dpctCell.font      = fnt({ color: { argb: DARK } });
@@ -379,10 +395,12 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       cheapestCell.font      = fnt({ bold: true, color: { argb: TEAL } });
       cheapestCell.numFmt    = "$#,##0.00";
       cheapestCell.alignment = { horizontal: "center" };
+      cheapestCell.border    = { left: grpLeft };
       if (numComp === 0) {
         cheapestCell.value = "";
       } else {
         const priceList = compPriceRefs.join(",");
+        // COUNT ignores text ("not listed") so only numeric prices contribute to MIN
         cheapestCell.value = { formula: `IF(OR(${aRef}="",COUNT(${priceList})=0),"",MIN(${priceList}))` };
       }
 
@@ -393,8 +411,9 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       if (numComp === 0) {
         flagCell.value = "";
       } else {
-        const minExpr = `MIN(${compPriceRefs.join(",")})`;
-        flagCell.value = { formula: `IF(OR(${aRef}="",E${r}="",COUNT(${compPriceRefs.join(",")})=0),"",IF(ISNUMBER(E${r}),IF(E${r}>${minExpr},"⚑",""),""))` };
+        const minExpr  = `MIN(${compPriceRefs.join(",")})`;
+        const priceList = compPriceRefs.join(",");
+        flagCell.value = { formula: `IF(OR(${aRef}="",NOT(ISNUMBER(E${r})),COUNT(${priceList})=0),"",IF(E${r}>${minExpr},"⚑",""))` };
       }
 
       // Zebra stripe (cols 2 onwards — col A stays always yellow)
@@ -407,6 +426,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
           }
         }
       }
+
     }
 
     // ── CF: competitor price, Δ$, Δ% columns ──
