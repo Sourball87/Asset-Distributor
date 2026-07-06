@@ -105,16 +105,25 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     snapMap.set(`${r.product_id}:${r.distributor_id}`, r);
   }
 
-  // ── 5a. Horizontal format ─────────────────────────────────────
+  // ── 5a. Horizontal format (formula-driven, paste-column input) ──
   if (req.query.format === "horizontal") {
-    // Column layout (1-based):
-    //   1=VPN, 2=Brand, 3=Description, 4=Dicker SOH, 5=Dicker Price,
-    //   then per competitor (4 cols each): SOH, Price, Δ$, Δ%
-    //   trailing: Cheapest Disti, DD Most Expensive
-    const BASE       = 5;
-    const COMP_STRIDE = 4;
-    const numComp    = competitors.length;
-    const compColSoh   = (i: number) => BASE + 1 + COMP_STRIDE * i;       // 6, 10, 14 …
+    // COMPARISON sheet column layout (1-based):
+    //   1 = paste VPN (yellow)       — user pastes SKUs here
+    //   2 = Brand                    — formula from DATA
+    //   3 = Description              — formula from DATA
+    //   4 = Dicker SOH               — formula from DATA
+    //   5 = Dicker Price (E)         — formula from DATA
+    //   per competitor i (0-based):
+    //     6+4i = SOH, 7+4i = Price, 8+4i = Δ$, 9+4i = Δ%
+    //   trailing: COL_CHEAPEST, COL_FLAG
+    //
+    // DATA sheet column layout (1-based, no header row):
+    //   1=key, 2=brand, 3=desc, 4=dicker_soh, 5=dicker_price
+    //   per competitor i: 6+2i=soh, 7+2i=price
+    const BASE         = 5;
+    const COMP_STRIDE  = 4;
+    const numComp      = competitors.length;
+    const compColSoh   = (i: number) => BASE + 1 + COMP_STRIDE * i;
     const compColPrice = (i: number) => BASE + 2 + COMP_STRIDE * i;
     const compColDelta = (i: number) => BASE + 3 + COMP_STRIDE * i;
     const compColDPct  = (i: number) => BASE + 4 + COMP_STRIDE * i;
@@ -122,6 +131,15 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     const COL_FLAG     = COL_CHEAPEST + 1;
     const TOTAL_COLS   = COL_FLAG;
 
+    const dataColCompSoh   = (i: number) => 6 + 2 * i;
+    const dataColCompPrice = (i: number) => 7 + 2 * i;
+
+    const hwb     = new ExcelJS.Workbook();
+    hwb.creator   = "DistiBench";
+    const hws     = hwb.addWorksheet("COMPARISON");
+    const hDataWs = hwb.addWorksheet("DATA", { state: "veryHidden" });
+
+    // ── DATA sheet (row 1 = first product, no header) ──
     const sortedH = [...products].sort((a, b) => {
       if (a.brand < b.brand) return -1;
       if (a.brand > b.brand) return 1;
@@ -129,22 +147,31 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       const bSOH = dickerDist ? (snapMap.get(`${b.id}:${dickerDist.id}`)?.soh ?? -1) : -1;
       return bSOH - aSOH;
     });
+    for (const p of sortedH) {
+      const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
+      const dkSOH   = dkSnap?.soh ?? null;
+      const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+      const compCols = competitors.flatMap((c) => {
+        const snap = snapMap.get(`${p.id}:${c.id}`);
+        return [
+          snap?.soh ?? null,
+          snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
+        ];
+      });
+      hDataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
+    }
 
-    const hwb = new ExcelJS.Workbook();
-    hwb.creator = "DistiBench";
-    const hws = hwb.addWorksheet("COMPARISON");
-
-    // Column widths
-    hws.getColumn(1).width = 22;  // VPN
-    hws.getColumn(2).width = 10;  // Brand
-    hws.getColumn(3).width = 40;  // Description
-    hws.getColumn(4).width = 9;   // Dicker SOH
-    hws.getColumn(5).width = 12;  // Dicker Price
+    // ── COMPARISON sheet column widths ──
+    hws.getColumn(1).width = 22;  // A: paste VPN
+    hws.getColumn(2).width = 10;  // B: brand
+    hws.getColumn(3).width = 40;  // C: description
+    hws.getColumn(4).width = 9;   // D: dicker soh
+    hws.getColumn(5).width = 12;  // E: dicker price
     for (let i = 0; i < numComp; i++) {
-      hws.getColumn(compColSoh(i)).width  = 9;
-      hws.getColumn(compColPrice(i)).width = 12;
-      hws.getColumn(compColDelta(i)).width = 13;
-      hws.getColumn(compColDPct(i)).width  = 9;
+      hws.getColumn(compColSoh(i)).width   = 9;
+      hws.getColumn(compColPrice(i)).width  = 12;
+      hws.getColumn(compColDelta(i)).width  = 13;
+      hws.getColumn(compColDPct(i)).width   = 9;
     }
     hws.getColumn(COL_CHEAPEST).width = 18;
     hws.getColumn(COL_FLAG).width     = 7;
@@ -179,7 +206,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       ...competitors.map((d) => ({ label: d.name, dist: d })),
     ];
     hFreshnessLines.forEach(({ label, dist }, idx) => {
-      const rn = 5 + idx;
+      const rn    = 5 + idx;
       const aCell = hws.getCell(rn, 1);
       aCell.value = label;
       aCell.font  = fnt({ bold: true, color: { argb: DARK } });
@@ -209,11 +236,17 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       ],
     });
 
-    // ── Distributor group header row ──
-    const GRP_ROW = hFreshnessEnd + 2;
+    // ── Instruction row ──
+    const INSTR_ROW = hFreshnessEnd + 2;
+    hws.mergeCells(INSTR_ROW, 1, INSTR_ROW, TOTAL_COLS);
+    const instrCell = hws.getCell(INSTR_ROW, 1);
+    instrCell.value = "Paste a list of SKUs into the yellow column (column A). Each row auto-populates with price and stock data across all distributors.";
+    instrCell.font  = fnt({ italic: true, color: { argb: GREY } });
+
+    // ── GRP_ROW: Distributor group headers ──
+    const GRP_ROW = INSTR_ROW + 2;
     hws.getRow(GRP_ROW).height = 18;
 
-    // Dicker group header (cols 4–5)
     hws.mergeCells(GRP_ROW, 4, GRP_ROW, 5);
     const dkGrpCell = hws.getCell(GRP_ROW, 4);
     dkGrpCell.value     = dickerDist ? `${dickerDist.name} ★` : "Dicker Data ★";
@@ -221,34 +254,31 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     dkGrpCell.fill      = solid(DARK);
     dkGrpCell.alignment = { horizontal: "center", vertical: "middle" };
 
-    // Competitor group headers
     competitors.forEach((comp, i) => {
-      const cStart = compColSoh(i);
-      const cEnd   = compColDPct(i);
-      hws.mergeCells(GRP_ROW, cStart, GRP_ROW, cEnd);
-      const gc = hws.getCell(GRP_ROW, cStart);
+      hws.mergeCells(GRP_ROW, compColSoh(i), GRP_ROW, compColDPct(i));
+      const gc = hws.getCell(GRP_ROW, compColSoh(i));
       gc.value     = comp.name;
       gc.font      = fnt({ bold: true, color: { argb: WHITE } });
       gc.fill      = solid(TEAL);
       gc.alignment = { horizontal: "center", vertical: "middle" };
     });
 
-    // ── Column sub-header row ──
+    // ── HDR_ROW: Sub-header row ──
     const HDR_ROW = GRP_ROW + 1;
     hws.getRow(HDR_ROW).height = 16;
 
     const subHdrs: Array<{ col: number; label: string }> = [
-      { col: 1, label: "VPN" },
+      { col: 1, label: "PASTE SKUs ▼" },
       { col: 2, label: "Brand" },
       { col: 3, label: "Description" },
       { col: 4, label: "SOH" },
       { col: 5, label: "Price (ex)" },
     ];
     for (let i = 0; i < numComp; i++) {
-      subHdrs.push({ col: compColSoh(i),   label: "SOH"       });
-      subHdrs.push({ col: compColPrice(i),  label: "Price (ex)" });
+      subHdrs.push({ col: compColSoh(i),   label: "SOH"          });
+      subHdrs.push({ col: compColPrice(i),  label: "Price (ex)"   });
       subHdrs.push({ col: compColDelta(i),  label: "Δ$ vs Dicker" });
-      subHdrs.push({ col: compColDPct(i),   label: "Δ %"       });
+      subHdrs.push({ col: compColDPct(i),   label: "Δ %"          });
     }
     subHdrs.push({ col: COL_CHEAPEST, label: "Cheapest" });
     subHdrs.push({ col: COL_FLAG,     label: "DD ↑" });
@@ -261,122 +291,192 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       c.alignment = { horizontal: col >= 4 ? "center" : "left", vertical: "middle", indent: col < 4 ? 1 : 0 };
     });
 
-    // Freeze top rows + VPN/Brand/Description columns
+    // Freeze first 3 cols (paste/brand/desc) and all header rows
     hws.views = [{ showGridLines: true, state: "frozen", xSplit: 3, ySplit: HDR_ROW }];
 
-    // ── Data rows ──
+    // ── Formula rows (M paste slots) ──
     const DATA_START = HDR_ROW + 1;
-    let rowIdx = DATA_START;
-    const deltaColRefs: string[] = [];   // collect Δ$ column letters for CF
+    const M          = 300;
+    const thinIN     = thin(IN_BORDER);
 
-    for (let i = 0; i < numComp; i++) {
-      deltaColRefs.push(colLetter(compColDelta(i)));
-    }
+    for (let k = 0; k < M; k++) {
+      const r = DATA_START + k;
 
-    for (const p of sortedH) {
-      const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
-      const dkSOH   = dkSnap?.soh ?? null;
-      const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+      // Col A — yellow paste cell
+      const pasteCell = hws.getCell(r, 1);
+      pasteCell.fill   = solid(INFILL);
+      pasteCell.font   = fnt({ color: { argb: DARK } });
+      pasteCell.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
 
-      // Compute competitor data + find cheapest
-      let cheapestName:  string | null = null;
-      let cheapestPrice: number | null = null;
-      const compValues: Array<{ soh: number | null; price: number | null; delta: number | null; deltaPct: number | null }> = [];
+      // Shared formula fragments for this row
+      const aRef  = `A${r}`;
+      const norm  = `UPPER(SUBSTITUTE(TRIM(${aRef})," ",""))`;
+      const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
+      // guard prefix: IF(A{r}="","", ...inner... ) — inner must close with ))
+      const g = `IF(${aRef}="","",`;
 
-      for (const comp of competitors) {
-        const snap  = snapMap.get(`${p.id}:${comp.id}`);
-        const price = snap?.sell_price != null ? parseFloat(snap.sell_price) : null;
-        const soh   = snap?.soh ?? null;
-        let delta:    number | null = null;
-        let deltaPct: number | null = null;
-        if (price != null && dkPrice != null) {
-          delta    = price - dkPrice;
-          deltaPct = dkPrice !== 0 ? ((price - dkPrice) / dkPrice) * 100 : null;
-        }
-        if (price != null && (cheapestPrice == null || price < cheapestPrice)) {
-          cheapestPrice = price;
-          cheapestName  = comp.name;
-        }
-        compValues.push({ soh, price, delta, deltaPct });
-      }
+      // Col B — Brand
+      const brandCell = hws.getCell(r, 2);
+      brandCell.value = { formula: `${g}IFERROR(INDEX(DATA!$B:$B,${mf}),"— not found —"))` };
+      brandCell.font  = fnt({ color: { argb: DARK } });
 
-      const dickerMostExp = dkPrice != null && cheapestPrice != null && dkPrice > cheapestPrice;
+      // Col C — Description
+      const descCell = hws.getCell(r, 3);
+      descCell.value = { formula: `${g}IFERROR(INDEX(DATA!$C:$C,${mf}),"— not found —"))` };
+      descCell.font  = fnt({ color: { argb: DARK } });
 
-      const row = hws.getRow(rowIdx);
-
-      // Fixed cols
-      const vpnCell = row.getCell(1);
-      vpnCell.value = p.vpnNormalized;
-      vpnCell.font  = fnt({ color: { argb: DARK } });
-
-      row.getCell(2).value = p.brand;
-      row.getCell(2).font  = fnt({ color: { argb: DARK } });
-
-      row.getCell(3).value = p.description;
-      row.getCell(3).font  = fnt({ color: { argb: DARK } });
-
-      const dkSohCell = row.getCell(4);
-      dkSohCell.value     = dkSOH;
+      // Col D — Dicker SOH
+      const dkSohCell = hws.getCell(r, 4);
+      dkSohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$D:$D,${mf}),""))` };
       dkSohCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkSohCell.alignment = { horizontal: "center" };
 
-      const dkPriceCell = row.getCell(5);
-      dkPriceCell.value     = dkPrice;
+      // Col E — Dicker Price
+      const dkPriceCell = hws.getCell(r, 5);
+      dkPriceCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$E:$E,${mf}),""))` };
       dkPriceCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkPriceCell.numFmt    = "$#,##0.00";
       dkPriceCell.alignment = { horizontal: "center" };
 
-      // Competitor cols
-      compValues.forEach((cv, i) => {
-        const sohCell = row.getCell(compColSoh(i));
-        sohCell.value     = cv.soh;
-        sohCell.alignment = { horizontal: "center" };
-        sohCell.font      = fnt({ color: { argb: DARK } });
+      // Competitor columns — collect price cell refs for cheapest/flag formulas
+      const compPriceRefs: string[] = [];
+      for (let i = 0; i < numComp; i++) {
+        const dataSOHLtr   = colLetter(dataColCompSoh(i));
+        const dataPriceLtr = colLetter(dataColCompPrice(i));
+        const priceLtr     = colLetter(compColPrice(i));
+        compPriceRefs.push(`${priceLtr}${r}`);
 
-        const priceCell = row.getCell(compColPrice(i));
-        priceCell.value     = cv.price;
+        // SOH
+        const sohCell = hws.getCell(r, compColSoh(i));
+        sohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$${dataSOHLtr}:$${dataSOHLtr},${mf}),""))` };
+        sohCell.font      = fnt({ color: { argb: DARK } });
+        sohCell.alignment = { horizontal: "center" };
+
+        // Price
+        const priceCell = hws.getCell(r, compColPrice(i));
+        priceCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf}),""))` };
+        priceCell.font      = fnt({ color: { argb: DARK } });
         priceCell.numFmt    = "$#,##0.00";
         priceCell.alignment = { horizontal: "center" };
-        priceCell.font      = fnt({ color: { argb: DARK } });
 
-        const deltaCell = row.getCell(compColDelta(i));
-        deltaCell.value     = cv.delta;
-        deltaCell.numFmt    = `[Red]-$#,##0.00;[Color10]+$#,##0.00`;
+        // Δ$ — competitor price minus Dicker price
+        const deltaCell = hws.getCell(r, compColDelta(i));
+        deltaCell.value     = { formula: `IF(OR(E${r}="",${priceLtr}${r}=""),"",${priceLtr}${r}-E${r})` };
+        deltaCell.numFmt    = `$#,##0.00`;
         deltaCell.alignment = { horizontal: "center" };
-        deltaCell.font      = fnt({ bold: true, color: { argb: cv.delta == null ? DARK : cv.delta < 0 ? RED_C : GREEN_C } });
+        deltaCell.font      = fnt({ color: { argb: DARK } });
 
-        const dpctCell = row.getCell(compColDPct(i));
-        dpctCell.value     = cv.deltaPct != null ? cv.deltaPct / 100 : null;
+        // Δ% — (competitor - dicker) / dicker
+        const dpctCell = hws.getCell(r, compColDPct(i));
+        dpctCell.value     = { formula: `IF(OR(E${r}="",${priceLtr}${r}="",E${r}=0),"",( ${priceLtr}${r}-E${r})/E${r})` };
         dpctCell.numFmt    = `+0.0%;-0.0%;`;
         dpctCell.alignment = { horizontal: "center" };
-        dpctCell.font      = fnt({ color: { argb: cv.deltaPct == null ? DARK : cv.deltaPct < 0 ? RED_C : GREEN_C } });
-      });
-
-      // Cheapest + flag
-      row.getCell(COL_CHEAPEST).value = cheapestName;
-      row.getCell(COL_CHEAPEST).font  = fnt({ color: { argb: TEAL } });
-
-      if (dickerMostExp) {
-        const flagCell = row.getCell(COL_FLAG);
-        flagCell.value     = "⚑";
-        flagCell.font      = fnt({ bold: true, color: { argb: RED_C } });
-        flagCell.alignment = { horizontal: "center" };
+        dpctCell.font      = fnt({ color: { argb: DARK } });
       }
 
-      // Zebra stripe
-      if ((rowIdx - DATA_START) % 2 === 1) {
-        for (let col = 1; col <= TOTAL_COLS; col++) {
-          const existing = row.getCell(col).fill;
-          if (!existing || (existing as ExcelJS.FillPattern).fgColor?.argb === WHITE) {
-            row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+      // Cheapest — nested IF to find name of competitor with lowest price
+      const cheapestCell = hws.getCell(r, COL_CHEAPEST);
+      cheapestCell.font  = fnt({ color: { argb: TEAL } });
+      if (numComp === 0) {
+        cheapestCell.value = "";
+      } else {
+        const minExpr = `MIN(${compPriceRefs.join(",")})`;
+        // Build nested IF chain from right to left: each level checks one competitor
+        let cheapFormula = `""`;
+        for (let i = numComp - 1; i >= 0; i--) {
+          const pRef = compPriceRefs[i];
+          const name = competitors[i].name.replace(/"/g, '""');
+          cheapFormula = `IF(ISNUMBER(${pRef}),IF(${pRef}=${minExpr},"${name}",${cheapFormula}),${cheapFormula})`;
+        }
+        cheapestCell.value = { formula: `IF(${aRef}="","",IF(COUNT(${compPriceRefs.join(",")})=0,"",${cheapFormula}))` };
+      }
+
+      // DD↑ — flag when Dicker is more expensive than the cheapest competitor
+      const flagCell = hws.getCell(r, COL_FLAG);
+      flagCell.font      = fnt({ bold: true, color: { argb: RED_C } });
+      flagCell.alignment = { horizontal: "center" };
+      if (numComp === 0) {
+        flagCell.value = "";
+      } else {
+        const minExpr = `MIN(${compPriceRefs.join(",")})`;
+        flagCell.value = { formula: `IF(OR(${aRef}="",E${r}="",COUNT(${compPriceRefs.join(",")})=0),"",IF(ISNUMBER(E${r}),IF(E${r}>${minExpr},"⚑",""),""))` };
+      }
+
+      // Zebra stripe (cols 2 onwards — col A stays always yellow)
+      if (k % 2 === 1) {
+        for (let col = 2; col <= TOTAL_COLS; col++) {
+          const cell     = hws.getCell(r, col);
+          const existing = cell.fill as ExcelJS.FillPattern | undefined;
+          if (!existing?.fgColor?.argb || existing.fgColor.argb === WHITE) {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
           }
         }
       }
-
-      rowIdx++;
     }
 
-    // Stream response
+    // ── CF: competitor price, Δ$, Δ% columns ──
+    // Price: red when cheaper than Dicker, green when more expensive
+    // Δ$ / Δ%: red when negative (competitor cheaper), green when positive
+    for (let i = 0; i < numComp; i++) {
+      const pLtr     = colLetter(compColPrice(i));
+      const deltaLtr = colLetter(compColDelta(i));
+      const dpctLtr  = colLetter(compColDPct(i));
+      const first    = DATA_START;
+      const last     = DATA_START + M - 1;
+
+      // Price column
+      hws.addConditionalFormatting({
+        ref: `${pLtr}${first}:${pLtr}${last}`,
+        rules: [
+          {
+            type: "expression", priority: 1,
+            formulae: [`AND(ISNUMBER(${pLtr}${first}),ISNUMBER(E${first}),${pLtr}${first}<E${first})`],
+            style: { font: { bold: true, color: { argb: RED_C } } },
+          },
+          {
+            type: "expression", priority: 2,
+            formulae: [`AND(ISNUMBER(${pLtr}${first}),ISNUMBER(E${first}),${pLtr}${first}>E${first})`],
+            style: { font: { bold: true, color: { argb: GREEN_C } } },
+          },
+        ],
+      });
+
+      // Δ$ column — negative = competitor cheaper = red
+      hws.addConditionalFormatting({
+        ref: `${deltaLtr}${first}:${deltaLtr}${last}`,
+        rules: [
+          {
+            type: "expression", priority: 1,
+            formulae: [`AND(ISNUMBER(${deltaLtr}${first}),${deltaLtr}${first}<0)`],
+            style: { font: { bold: true, color: { argb: RED_C } } },
+          },
+          {
+            type: "expression", priority: 2,
+            formulae: [`AND(ISNUMBER(${deltaLtr}${first}),${deltaLtr}${first}>0)`],
+            style: { font: { bold: true, color: { argb: GREEN_C } } },
+          },
+        ],
+      });
+
+      // Δ% column — same sign logic
+      hws.addConditionalFormatting({
+        ref: `${dpctLtr}${first}:${dpctLtr}${last}`,
+        rules: [
+          {
+            type: "expression", priority: 1,
+            formulae: [`AND(ISNUMBER(${dpctLtr}${first}),${dpctLtr}${first}<0)`],
+            style: { font: { bold: true, color: { argb: RED_C } } },
+          },
+          {
+            type: "expression", priority: 2,
+            formulae: [`AND(ISNUMBER(${dpctLtr}${first}),${dpctLtr}${first}>0)`],
+            style: { font: { bold: true, color: { argb: GREEN_C } } },
+          },
+        ],
+      });
+    }
+
+    // ── Stream response ──
     const brandLabel = selectedBrands.length > 0 ? selectedBrands.join("_") : "ALL";
     const today      = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const hfname     = `Compare_Horizontal_${brandLabel}_${today}.xlsx`;
