@@ -143,8 +143,8 @@ router.get("/insights/export", requireAuth, async (req, res): Promise<void> => {
           b.min_instock_comp_price AS cheapest_comp_price,
           b.cheapest_instock_disti AS cheapest_comp_name,
           ROUND((b.dicker_price - b.min_instock_comp_price)::numeric, 2) AS gap_dollars,
-          CASE WHEN b.min_instock_comp_price > 0
-            THEN ROUND(((b.dicker_price - b.min_instock_comp_price) / b.min_instock_comp_price * 100)::numeric, 2)
+          CASE WHEN b.dicker_price > 0 AND b.min_instock_comp_price > 0
+            THEN ROUND(((1 - b.min_instock_comp_price / b.dicker_price) * 100)::numeric, 2)
           END AS gap_pct,
           (SELECT json_agg(
              json_build_object('name', c2.disti_name, 'price', c2.sell_price, 'soh', COALESCE(c2.soh, 0))
@@ -302,8 +302,8 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
     dearer_rows AS (
       SELECT *,
         dicker_price - min_comp_price                                          AS gap_dollars,
-        CASE WHEN min_comp_price > 0
-          THEN ROUND(((dicker_price - min_comp_price) / min_comp_price * 100)::numeric, 2)
+        CASE WHEN dicker_price > 0 AND min_comp_price > 0
+          THEN ROUND(((1 - min_comp_price / dicker_price) * 100)::numeric, 2)
         END                                                                    AS gap_pct
       FROM benchmarked
       WHERE dicker_price > min_comp_price
@@ -318,12 +318,12 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
         ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
           ORDER BY CASE WHEN dicker_price > min_comp_price THEN dicker_price - min_comp_price END
         )::numeric, 2)                                                            AS median_gap_dollars,
-        ROUND(AVG(CASE WHEN dicker_price > min_comp_price AND min_comp_price > 0
-          THEN (dicker_price - min_comp_price) / min_comp_price * 100 END)::numeric, 2)
+        ROUND(AVG(CASE WHEN dicker_price > min_comp_price AND dicker_price > 0 AND min_comp_price > 0
+          THEN (1 - min_comp_price / dicker_price) * 100 END)::numeric, 2)
                                                                                   AS avg_gap_pct,
         ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
-          ORDER BY CASE WHEN dicker_price > min_comp_price AND min_comp_price > 0
-            THEN (dicker_price - min_comp_price) / min_comp_price * 100 END
+          ORDER BY CASE WHEN dicker_price > min_comp_price AND dicker_price > 0 AND min_comp_price > 0
+            THEN (1 - min_comp_price / dicker_price) * 100 END
         )::numeric, 2)                                                            AS median_gap_pct,
         ROUND(COALESCE(SUM(
           CASE WHEN dicker_price > min_instock_comp_price AND min_instock_comp_price IS NOT NULL
@@ -341,8 +341,8 @@ router.get("/insights", requireAuth, async (req, res): Promise<void> => {
          WHERE c2.product_id = b.product_id AND COALESCE(c2.soh,0) > 0
          ORDER BY c2.sell_price ASC LIMIT 1)                            AS cheapest_instock_comp_soh,
         ROUND((b.dicker_price - b.min_instock_comp_price)::numeric, 2)  AS gap_dollars,
-        CASE WHEN b.min_instock_comp_price > 0
-          THEN ROUND(((b.dicker_price - b.min_instock_comp_price) / b.min_instock_comp_price * 100)::numeric, 2)
+        CASE WHEN b.dicker_price > 0 AND b.min_instock_comp_price > 0
+          THEN ROUND(((1 - b.min_instock_comp_price / b.dicker_price) * 100)::numeric, 2)
         END                                                              AS gap_pct,
         b.dicker_soh
       FROM benchmarked b

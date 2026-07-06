@@ -279,6 +279,11 @@ function fmtPct(n: number | null | undefined): string {
   return Math.round(Number(n)) + "%";
 }
 
+function fmtGapPct(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return Math.round(Number(n)) + "%";
+}
+
 function fmtN(n: number | null | undefined): string {
   if (n == null) return "—";
   return Number(n).toLocaleString();
@@ -426,7 +431,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
                     <td className="px-3 py-1.5 text-right font-mono text-emerald-700">{fmt$(r.cheapest_comp_price)}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{r.cheapest_comp_name}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmt$(r.gap_dollars)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmtPct(r.gap_pct)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmtGapPct(r.gap_pct)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.dicker_soh)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.cheapest_instock_comp_soh)}</td>
                   </tr>
