@@ -374,21 +374,16 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         dpctCell.font      = fnt({ color: { argb: DARK } });
       }
 
-      // Cheapest — nested IF to find name of competitor with lowest price
+      // Cheapest — MIN price across all competitor price cells in this row
       const cheapestCell = hws.getCell(r, COL_CHEAPEST);
-      cheapestCell.font  = fnt({ color: { argb: TEAL } });
+      cheapestCell.font      = fnt({ bold: true, color: { argb: TEAL } });
+      cheapestCell.numFmt    = "$#,##0.00";
+      cheapestCell.alignment = { horizontal: "center" };
       if (numComp === 0) {
         cheapestCell.value = "";
       } else {
-        const minExpr = `MIN(${compPriceRefs.join(",")})`;
-        // Build nested IF chain from right to left: each level checks one competitor
-        let cheapFormula = `""`;
-        for (let i = numComp - 1; i >= 0; i--) {
-          const pRef = compPriceRefs[i];
-          const name = competitors[i].name.replace(/"/g, '""');
-          cheapFormula = `IF(ISNUMBER(${pRef}),IF(${pRef}=${minExpr},"${name}",${cheapFormula}),${cheapFormula})`;
-        }
-        cheapestCell.value = { formula: `IF(${aRef}="","",IF(COUNT(${compPriceRefs.join(",")})=0,"",${cheapFormula}))` };
+        const priceList = compPriceRefs.join(",");
+        cheapestCell.value = { formula: `IF(OR(${aRef}="",COUNT(${priceList})=0),"",MIN(${priceList}))` };
       }
 
       // DD↑ — flag when Dicker is more expensive than the cheapest competitor
