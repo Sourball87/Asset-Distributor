@@ -353,6 +353,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /distributors/{id}/uploads:
+    delete:
+      operationId: deleteDistributorUploads
+      tags: [distributors]
+      summary: Delete all uploads (and their snapshots) for a distributor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: All uploads deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /distributors/{id}:
     patch:
       operationId: updateDistributor

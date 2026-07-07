@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useListDistributors, getListDistributorsQueryKey, useCreateDistributor, useUpdateDistributor, useDeleteDistributor } from "@workspace/api-client-react";
+import { useListDistributors, getListDistributorsQueryKey, useCreateDistributor, useUpdateDistributor, useDeleteDistributor, useDeleteDistributorUploads } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDate } from "@/lib/date";
 import { useForm } from "react-hook-form";
@@ -8,10 +8,10 @@ import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, CheckCircle2 } from "lucide-react";
+import { Plus, Pencil, Trash2, CheckCircle2, DatabaseZap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 
@@ -28,7 +28,7 @@ export default function Distributors() {
   const canEdit = user?.role !== "user";
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
+
   const { data: distributors = [], isLoading } = useListDistributors({
     query: { queryKey: getListDistributorsQueryKey() }
   });
@@ -61,12 +61,31 @@ export default function Distributors() {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListDistributorsQueryKey() });
         toast({ title: "Distributor deleted" });
+      },
+      onError: (err: any) => {
+        const message = err?.response?.data?.error ?? err?.message ?? "Failed to delete distributor";
+        toast({ title: "Cannot delete distributor", description: message, variant: "destructive" });
+      }
+    }
+  });
+
+  const deleteDistributorUploads = useDeleteDistributorUploads({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListDistributorsQueryKey() });
+        setClearUploadsTarget(null);
+        toast({ title: "Uploads cleared", description: "All upload history has been removed." });
+      },
+      onError: (err: any) => {
+        const message = err?.response?.data?.error ?? err?.message ?? "Failed to clear uploads";
+        toast({ title: "Error", description: message, variant: "destructive" });
       }
     }
   });
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [clearUploadsTarget, setClearUploadsTarget] = useState<{ id: number; name: string } | null>(null);
 
   const form = useForm<DistributorFormValues>({
     resolver: zodResolver(distributorSchema),
@@ -101,6 +120,11 @@ export default function Distributors() {
     if (confirm("Are you sure you want to delete this distributor?")) {
       deleteDistributor.mutate({ id });
     }
+  };
+
+  const handleConfirmClearUploads = () => {
+    if (!clearUploadsTarget) return;
+    deleteDistributorUploads.mutate({ id: clearUploadsTarget.id });
   };
 
   const onSubmit = (data: DistributorFormValues) => {
@@ -168,6 +192,18 @@ export default function Distributors() {
                             Set Baseline
                           </Button>
                         )}
+                        {dist.lastUploadAt && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setClearUploadsTarget({ id: dist.id, name: dist.name })}
+                            title="Delete all uploads for this distributor"
+                          >
+                            <DatabaseZap className="h-3.5 w-3.5 mr-1" />
+                            Clear uploads
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(dist)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -204,7 +240,7 @@ export default function Distributors() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={form.control}
                 name="stalenessThresholdDays"
@@ -251,6 +287,41 @@ export default function Distributors() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!clearUploadsTarget} onOpenChange={(open) => { if (!open) setClearUploadsTarget(null); }}>
+        <DialogContent className="sm:max-w-[420px] rounded-sm">
+          <DialogHeader>
+            <DialogTitle>Delete all uploads</DialogTitle>
+            <DialogDescription className="text-xs pt-1">
+              This will permanently delete all upload history and snapshot data for{" "}
+              <span className="font-semibold text-foreground">{clearUploadsTarget?.name}</span>.
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-4 border-t border-border mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-sm text-xs"
+              onClick={() => setClearUploadsTarget(null)}
+              disabled={deleteDistributorUploads.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="h-8 rounded-sm text-xs"
+              onClick={handleConfirmClearUploads}
+              disabled={deleteDistributorUploads.isPending}
+            >
+              {deleteDistributorUploads.isPending ? "Deleting..." : "Delete all uploads"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

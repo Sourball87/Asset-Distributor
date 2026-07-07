@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, distributorsTable, uploadsTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { db, distributorsTable, uploadsTable, stockSnapshotsTable } from "@workspace/db";
+import { eq, desc, sql, inArray } from "drizzle-orm";
 import {
   CreateDistributorBody,
   UpdateDistributorBody,
@@ -130,6 +130,35 @@ router.patch("/distributors/:id", requireElevatedRole, async (req, res): Promise
     lastUploadAt: lastUpload?.uploadedAt?.toISOString() ?? null,
     lastUploadStatus: lastUpload?.status ?? null,
   });
+});
+
+router.delete("/distributors/:id/uploads", requireElevatedRole, async (req, res): Promise<void> => {
+  const params = DeleteDistributorParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const { id } = params.data;
+
+  const [distributor] = await db.select({ id: distributorsTable.id }).from(distributorsTable).where(eq(distributorsTable.id, id));
+  if (!distributor) {
+    res.status(404).json({ error: "Distributor not found" });
+    return;
+  }
+
+  const uploadRows = await db
+    .select({ id: uploadsTable.id })
+    .from(uploadsTable)
+    .where(eq(uploadsTable.distributorId, id));
+
+  if (uploadRows.length > 0) {
+    const uploadIds = uploadRows.map((u) => u.id);
+    await db.delete(stockSnapshotsTable).where(inArray(stockSnapshotsTable.uploadId, uploadIds));
+    await db.delete(uploadsTable).where(eq(uploadsTable.distributorId, id));
+  }
+
+  res.sendStatus(204);
 });
 
 router.delete("/distributors/:id", requireElevatedRole, async (req, res): Promise<void> => {

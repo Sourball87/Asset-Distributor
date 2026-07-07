@@ -1017,6 +1017,76 @@ export const useCreateDistributor = <TError = ErrorType<ErrorResponse>,
       return useMutation(getCreateDistributorMutationOptions(options));
     }
 
+export const getDeleteDistributorUploadsUrl = (id: number,) => {
+
+
+
+
+  return `/api/distributors/${id}/uploads`
+}
+
+/**
+ * @summary Delete all uploads (and their snapshots) for a distributor
+ */
+export const deleteDistributorUploads = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteDistributorUploadsUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteDistributorUploadsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDistributorUploads>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDistributorUploads>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteDistributorUploads'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDistributorUploads>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteDistributorUploads(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDistributorUploadsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDistributorUploads>>>
+
+    export type DeleteDistributorUploadsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete all uploads (and their snapshots) for a distributor
+ */
+export const useDeleteDistributorUploads = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDistributorUploads>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDistributorUploads>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteDistributorUploadsMutationOptions(options));
+    }
+
 export const getUpdateDistributorUrl = (id: number,) => {
 
 

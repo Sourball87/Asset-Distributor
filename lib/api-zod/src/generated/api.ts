@@ -200,6 +200,16 @@ export const CreateDistributorResponse = zod.object({
 
 
 /**
+ * @summary Delete all uploads (and their snapshots) for a distributor
+ */
+export const DeleteDistributorUploadsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteDistributorUploadsResponse = zod.void()
+
+
+/**
  * @summary Update a distributor
  */
 export const UpdateDistributorParams = zod.object({
