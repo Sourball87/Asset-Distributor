@@ -63,6 +63,26 @@ function AdminRoute({ component: Component, ...rest }: any) {
   return <Component {...rest} />;
 }
 
+// Admin or superuser route wrapper
+function ElevatedRoute({ component: Component, ...rest }: any) {
+  const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!isLoading && (!user || user.role === "user")) {
+      setLocation("/");
+    }
+  }, [user, isLoading, setLocation]);
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center text-sm font-mono">Loading...</div>;
+  }
+
+  if (!user || user.role === "user") return null;
+
+  return <Component {...rest} />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -106,7 +126,7 @@ function Router() {
       <Route path="/settings/distributors">
         {() => (
           <Layout>
-            <ProtectedRoute component={Distributors} />
+            <ElevatedRoute component={Distributors} />
           </Layout>
         )}
       </Route>

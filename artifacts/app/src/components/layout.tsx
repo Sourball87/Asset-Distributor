@@ -49,7 +49,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   ];
 
   const settingsItems = [
-    { href: "/settings/distributors", label: "Distributors", icon: Building2 },
+    ...(!isUser ? [{ href: "/settings/distributors", label: "Distributors", icon: Building2 }] : []),
     { href: "/settings/brands", label: "Brands", icon: Package },
     ...(!isUser ? [{ href: "/settings/import-profiles", label: "Import Profiles", icon: FileSliders }] : []),
     ...(isAdmin ? [{ href: "/settings/users", label: "Users", icon: Users, badge: pendingCount }] : []),
