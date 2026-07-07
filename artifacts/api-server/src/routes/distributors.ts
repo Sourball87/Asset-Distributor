@@ -7,11 +7,11 @@ import {
   UpdateDistributorParams,
   DeleteDistributorParams,
 } from "@workspace/api-zod";
-import { requireElevatedRole } from "../middlewares/auth";
+import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 
 const router = Router();
 
-router.get("/distributors", requireElevatedRole, async (req, res): Promise<void> => {
+router.get("/distributors", requireAuth, async (req, res): Promise<void> => {
   const distributors = await db.select().from(distributorsTable).orderBy(distributorsTable.name);
 
   // Attach last upload info
