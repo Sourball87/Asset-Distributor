@@ -1,0 +1,5 @@
+StockCode,VendorStockCode,DealerEx,StockAvailable,StockDescription,Vendor
+  DD-Z001,TSTZERO-001,10.00,0,Test Zero SOH Product,SAMSUNG
+  DD-N001,TSTNEG-001,15.00,-5,Test Negative SOH Product,SAMSUNG
+  DD-P001,TSTPOS-001,20.00,100,Test Positive SOH Product,SAMSUNG
+  
