@@ -29,8 +29,6 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       sellPrice:       string | null;
       soh:             number | null;
       soo:             number | null;
-      prevSoh:         number | null;
-      prevDate:        string | null;
     }>;
   };
 
@@ -62,23 +60,9 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
           ss.sell_price::numeric AS sell_price,
           ss.soh,
           ss.soo,
-          ss.snapshot_date,
-          ss.id AS ss_id
+          ss.snapshot_date
         FROM stock_snapshots ss
         WHERE ss.product_id IN (SELECT id FROM paged_products)
-        ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
-      ),
-      prev_ss AS (
-        SELECT DISTINCT ON (ss.product_id, ss.distributor_id)
-          ss.product_id,
-          ss.distributor_id,
-          ss.soh          AS prev_soh,
-          ss.snapshot_date AS prev_date
-        FROM stock_snapshots ss
-        JOIN latest_ss l ON l.product_id     = ss.product_id
-                        AND l.distributor_id = ss.distributor_id
-        WHERE ss.snapshot_date < l.snapshot_date
-           OR (ss.snapshot_date = l.snapshot_date AND ss.id < l.ss_id)
         ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
       )
     SELECT
@@ -95,15 +79,12 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
           'isBaseline',      d.is_baseline,
           'sellPrice',       l.sell_price,
           'soh',             l.soh,
-          'soo',             l.soo,
-          'prevSoh',         pr.prev_soh,
-          'prevDate',        pr.prev_date
+          'soo',             l.soo
         ) ORDER BY d.is_baseline DESC, d.name
       ) AS distributor_data
     FROM paged_products pp
     CROSS JOIN distributors d
-    LEFT JOIN latest_ss l  ON l.product_id  = pp.id AND l.distributor_id  = d.id
-    LEFT JOIN prev_ss   pr ON pr.product_id = pp.id AND pr.distributor_id = d.id
+    LEFT JOIN latest_ss l ON l.product_id = pp.id AND l.distributor_id = d.id
     CROSS JOIN total t
     GROUP BY pp.id, pp.vpn_normalized, pp.vpn_display, pp.brand, pp.description, t.cnt
     ORDER BY pp.brand, pp.vpn_normalized
@@ -137,16 +118,6 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     const distributors = distData.map((d) => {
       const sellPrice = d.sellPrice != null ? Number(d.sellPrice) : null;
 
-      // Movement vs previous snapshot
-      let movement:          number | null = null;
-      let movementSinceDate: string | null = null;
-      if (d.prevDate !== null && d.soh != null && d.prevSoh != null) {
-        movement          = d.soh - d.prevSoh;
-        movementSinceDate = d.prevDate as string;
-      }
-
-      const isNew = d.prevDate === null;
-
       let priceDelta:    number | null = null;
       let priceDeltaPct: number | null = null;
       if (!d.isBaseline && sellPrice != null && dickerPrice != null) {
@@ -170,9 +141,9 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
         sellPrice,
         soh:              d.soh,
         soo:              d.soo,
-        movement,
-        movementSinceDate,
-        isNew,
+        movement:         null,
+        movementSinceDate: null,
+        isNew:            true,
         priceDelta,
         priceDeltaPct,
       };

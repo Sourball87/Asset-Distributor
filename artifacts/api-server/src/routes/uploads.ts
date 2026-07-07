@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
@@ -280,11 +280,16 @@ async function commitRowsBatched(
     const rawPrice = row[mapping.sell_price as string] ?? "";
     const rawSoh = row[mapping.soh as string] ?? "";
     const rawSoo = mapping.soo ? (row[mapping.soo] ?? "") : "";
-    const sellPrice = parseFloat(rawPrice.replace(/[^0-9.-]/g, "")) || null;
-    const sohRaw = rawSoh ? parseInt(rawSoh.replace(/[^0-9]/g, ""), 10) || null : null;
+    // sell_price: strip currency symbols but preserve sign; null only on empty/NaN (0 is valid)
+    const sellPriceNum = parseFloat(rawPrice.replace(/[^0-9.-]/g, ""));
+    const sellPrice = rawPrice.trim() === "" || isNaN(sellPriceNum) ? null : sellPriceNum;
+    // soh/soo: preserve sign for negative values; treat 0 as 0 (not null); null only on empty/NaN
+    const sohParsed = rawSoh.trim() === "" ? NaN : parseInt(rawSoh.replace(/[^0-9-]/g, ""), 10);
+    const sohRaw = isNaN(sohParsed) ? null : sohParsed;
     // 999999999 is Dicker Data's placeholder for digital/non-physical items — treat as 0 (no stock)
     const soh = sohRaw === 999999999 ? 0 : sohRaw;
-    const soo = rawSoo ? parseInt(rawSoo.replace(/[^0-9]/g, ""), 10) || null : null;
+    const sooParsed = rawSoo.trim() === "" ? NaN : parseInt(rawSoo.replace(/[^0-9-]/g, ""), 10);
+    const soo = isNaN(sooParsed) ? null : sooParsed;
     const category          = mapping.category           ? ((row[mapping.category]           ?? "").trim() || null) : null;
     const secondaryCategory = mapping.secondary_category ? ((row[mapping.secondary_category] ?? "").trim() || null) : null;
     const skuType           = mapping.sku_type           ? ((row[mapping.sku_type]           ?? "").trim() || null) : null;
@@ -360,6 +365,10 @@ async function commitRowsBatched(
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
 
+  // Replace semantics: delete existing snapshots for this distributor + date so re-uploads don't duplicate
+  await db.delete(stockSnapshotsTable)
+    .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
+
   for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
     await db.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
   }
@@ -371,28 +380,26 @@ async function commitRowsBatched(
 router.get("/uploads", requireAuth, async (req, res): Promise<void> => {
   const distributorId = req.query.distributorId ? Number(req.query.distributorId) : undefined;
 
-  const query = db.select().from(uploadsTable).orderBy(desc(uploadsTable.uploadedAt));
-  const uploads = distributorId
-    ? await db.select().from(uploadsTable).where(eq(uploadsTable.distributorId, distributorId)).orderBy(desc(uploadsTable.uploadedAt))
-    : await db.select().from(uploadsTable).orderBy(desc(uploadsTable.uploadedAt));
+  const base = db
+    .select({
+      id: uploadsTable.id,
+      distributorId: uploadsTable.distributorId,
+      distributorName: distributorsTable.name,
+      filename: uploadsTable.filename,
+      uploadedAt: uploadsTable.uploadedAt,
+      snapshotDate: uploadsTable.snapshotDate,
+      rowCountTotal: uploadsTable.rowCountTotal,
+      rowCountMatched: uploadsTable.rowCountMatched,
+      status: uploadsTable.status,
+    })
+    .from(uploadsTable)
+    .innerJoin(distributorsTable, eq(uploadsTable.distributorId, distributorsTable.id));
 
-  const [dist] = distributorId
-    ? await db.select().from(distributorsTable).where(eq(distributorsTable.id, distributorId))
-    : [];
+  const uploads = await (distributorId
+    ? base.where(eq(uploadsTable.distributorId, distributorId)).orderBy(desc(uploadsTable.uploadedAt))
+    : base.orderBy(desc(uploadsTable.uploadedAt)));
 
-  const result = uploads.map((u) => ({
-    id: u.id,
-    distributorId: u.distributorId,
-    distributorName: dist?.name ?? "",
-    filename: u.filename,
-    uploadedAt: u.uploadedAt.toISOString(),
-    snapshotDate: u.snapshotDate,
-    rowCountTotal: u.rowCountTotal,
-    rowCountMatched: u.rowCountMatched,
-    status: u.status,
-  }));
-
-  res.json(result);
+  res.json(uploads.map((u) => ({ ...u, uploadedAt: u.uploadedAt.toISOString() })));
 });
 
 // POST /uploads/parse — parse file, return preview + auto-detect distributor

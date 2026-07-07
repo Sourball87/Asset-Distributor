@@ -139,14 +139,22 @@ router.delete("/distributors/:id", requireElevatedRole, async (req, res): Promis
     return;
   }
 
-  const [deleted] = await db.delete(distributorsTable).where(eq(distributorsTable.id, params.data.id)).returning();
+  try {
+    const [deleted] = await db.delete(distributorsTable).where(eq(distributorsTable.id, params.data.id)).returning();
 
-  if (!deleted) {
-    res.status(404).json({ error: "Distributor not found" });
-    return;
+    if (!deleted) {
+      res.status(404).json({ error: "Distributor not found" });
+      return;
+    }
+
+    res.sendStatus(204);
+  } catch (err: unknown) {
+    if (err != null && typeof err === "object" && "code" in err && err.code === "23503") {
+      res.status(409).json({ error: "Cannot delete this distributor because it has existing upload history. Remove all uploads for this distributor first." });
+      return;
+    }
+    throw err;
   }
-
-  res.sendStatus(204);
 });
 
 export default router;
