@@ -10,7 +10,7 @@ import {
 
 const router = Router();
 
-router.use(requireAdmin);
+router.use("/admin", requireAdmin);
 
 router.get("/admin/users", async (req, res): Promise<void> => {
   const users = await db
