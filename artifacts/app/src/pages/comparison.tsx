@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, AlertCircle, FileDown } from "lucide-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -221,6 +222,7 @@ export default function Comparison() {
   const [onlyMostExpensive, setOnlyMostExpensive] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchParam, setSearchParam] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const { data: brandsData } = useListBrands();
   const brands = brandsData ?? [];
@@ -256,6 +258,37 @@ export default function Comparison() {
     }),
     [],
   );
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (brandFilter && brandFilter !== "all") params.set("brand", brandFilter);
+      if (searchParam) params.set("search", searchParam);
+      if (onlyMostExpensive) params.set("onlyMostExpensive", "true");
+
+      const response = await fetch(`/api/comparison-export?${params.toString()}`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+
+      const blob        = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const match       = disposition.match(/filename="(.+?)"/);
+      const filename    = match?.[1] ?? "Comparison.xlsx";
+
+      const url = window.URL.createObjectURL(blob);
+      const a   = document.createElement("a");
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      // silent — in production a toast would be added here
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const total = data?.total ?? null;
   const expensiveRows = useMemo(() => rowData.filter((r) => r.dickerIsMostExpensive).length, [rowData]);
@@ -314,8 +347,21 @@ export default function Comparison() {
           Only where Dicker is most expensive
         </label>
 
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs rounded-sm gap-1.5 ml-auto"
+          onClick={handleExport}
+          disabled={exporting || isLoading}
+        >
+          {exporting
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <FileDown className="h-3.5 w-3.5" />}
+          {exporting ? "Generating…" : "Export"}
+        </Button>
+
         {isLoading && (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading…
           </span>
