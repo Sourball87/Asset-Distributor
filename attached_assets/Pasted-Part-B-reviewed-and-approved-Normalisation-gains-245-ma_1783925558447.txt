@@ -1,0 +1,27 @@
+Part B reviewed and approved. Normalisation gains +245 matches with zero regressions. Proceed with Stages 2-5 in order. Stop and report after each stage.
+
+STAGE 2 — RE-AUDIT (read-only)
+Re-run the merge-group audit with key = UPPER(REGEXP_REPLACE(vpn_normalized, '[^A-Za-z0-9+]', '', 'g')) on post-purge data. Confirm: no cross-brand conflicts, and UPOE / ASEW*NBD* / M4250-POE groups do not collide (+ is preserved). Report group count and products affected, then proceed if clean.
+
+STAGE 3 — MERGE MIGRATION (single transaction)
+1. Survivor per group = product with most recent snapshot (snapshot_date DESC, id DESC); tie-break lowest id.
+2. Repoint stock_snapshots.product_id from losers to survivor.
+3. Survivor takes vpn_display/brand/description from the product holding the latest Dicker snapshot in the group (fallback: survivor's own).
+4. Delete loser products.
+5. Re-normalize ALL products.vpn_normalized with the new rule.
+Verify before COMMIT: vpn_normalized unique, zero snapshots referencing deleted products. Report groups merged and products removed.
+
+STAGE 4 — CODE CHANGES (one PR)
+1. vpn.ts: normalizeVpn() → raw.trim().toUpperCase().replace(/[^A-Z0-9+]/g, ""). Doc comment: + preserved deliberately (PoE+/PoE++, NBD+ tiers).
+2. uploads.ts: change the Dicker fingerprint mapping from vpn: "VendorStockCode" to vpn: "StockCode" so code matches the saved profile.
+3. compare-file.ts: DATA sheet key uses new normalization; paste-cell formula strips space/hyphen/dot/comma/slash but NOT + — both occurrences (~326, ~689).
+4. e2e tests: (i) "Archer AX55" then "ARCHER-AX55" across two uploads → one product, latest price wins; (ii) "U-POE+" and "U-POE++" committed together → remain two products.
+
+STAGE 5 — HYGIENE
+1. Same-date duplicate cleanup: delete stock_snapshots rows whose upload_id is not the latest committed upload per distributor + snapshot_date (exclude status 'invalid_mapping'). Pre-COMMIT sanity check: zero distributor+date pairs with >1 upload_id. Report rows deleted.
+2. Wrap the replace-semantics delete + chunked inserts in commitRowsBatched() in a single db.transaction(). Product upserts may stay outside it.
+
+STAGE 6 — DIAGNOSTIC ONLY (read-only, no changes)
+Ingram reverse-match check: of Ingram products with no Dicker match under the new key, sample 30 (highest sell_price). For each, search the latest Dicker raw file's VendorStockCode column for a value that normalises to the same key. Report how many would be rescued by a VendorStockCode-alias fallback vs how many are genuine range gaps. Do not implement anything — report only.
+
+NOTE for backlog, do not action now: Dicker feed contains sentinel prices ($9,999,999 / $16,302,144). Consider a data-quality flag or exclusion from insights in a future task.

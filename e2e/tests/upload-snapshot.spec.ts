@@ -1,11 +1,16 @@
 /**
- * E2E tests for upload replace semantics and SOH value storage.
+ * E2E tests for upload replace semantics, SOH value storage, and VPN
+ * normalisation behaviour.
  *
  * Scenarios covered:
  *  1. SOH=0 is stored as integer 0 (not null) after commit
  *  2. SOH=-5 (negative) is stored with correct sign (not null)
  *  3. Re-committing the same distributor+date replaces snapshots (no duplicates)
  *  4. Comparison API returns soh: 0 (not null) for zero-stock product
+ *  5. Two uploads with different VPN formats (hyphen vs space) normalise to one
+ *     product and the latest price wins
+ *  6. U-POE+ and U-POE++ committed together remain two separate products
+ *     (+ is preserved in normalisation)
  *
  * The test creates its own admin user in beforeAll and removes it in afterAll
  * so it does not depend on any pre-existing credentials.
@@ -37,22 +42,23 @@ function uid(): string {
   return randomBytes(4).toString("hex").toUpperCase();
 }
 
-// Build a Dicker Data–format CSV with three rows:
+// Build a Dicker Data–format CSV using the StockCode column as VPN.
+// VPN values are alphanumeric-only (no hyphens) so vpn_normalized === VPN.
 //   ZERO row: SOH = 0   (key correctness check)
 //   NEG  row: SOH = -5  (sign preservation check)
 //   POS  row: SOH = 100 (sanity check)
 function buildCsv(suffix: string): string {
   return [
-    "StockCode,VendorStockCode,DealerEx,StockAvailable,StockDescription,Vendor",
-    `DD-Z,TST-ZERO-${suffix},10.00,0,Test Zero SOH ${suffix},SAMSUNG`,
-    `DD-N,TST-NEG-${suffix},15.00,-5,Test Negative SOH ${suffix},SAMSUNG`,
-    `DD-P,TST-POS-${suffix},20.00,100,Test Positive SOH ${suffix},SAMSUNG`,
+    "StockCode,Vendor,DealerEx,StockAvailable,StockDescription",
+    `TSTZERO${suffix},SAMSUNG,10.00,0,Test Zero SOH ${suffix}`,
+    `TSTNEG${suffix},SAMSUNG,15.00,-5,Test Negative SOH ${suffix}`,
+    `TSTPOS${suffix},SAMSUNG,20.00,100,Test Positive SOH ${suffix}`,
   ].join("\n");
 }
 
-// Dicker Data column mapping.
+// Dicker Data column mapping — vpn maps to StockCode (correct column).
 const DICKER_MAPPING = {
-  vpn: "VendorStockCode",
+  vpn: "StockCode",
   brand: "Vendor",
   description: "StockDescription",
   sell_price: "DealerEx",
@@ -96,7 +102,7 @@ async function dbSnapshotRows(
   suffix: string,
 ): Promise<Array<{ vpn_normalized: string; soh: number | null }>> {
   return withDb(async (client) => {
-    const vpns = [`TST-ZERO-${suffix}`, `TST-NEG-${suffix}`, `TST-POS-${suffix}`];
+    const vpns = [`TSTZERO${suffix}`, `TSTNEG${suffix}`, `TSTPOS${suffix}`];
     const { rows } = await client.query<{ vpn_normalized: string; soh: number | null }>(
       `SELECT p.vpn_normalized, ss.soh
        FROM stock_snapshots ss
@@ -113,7 +119,7 @@ async function dbSnapshotRows(
 
 async function dbCleanup(suffix: string): Promise<void> {
   await withDb(async (client) => {
-    const vpns = [`TST-ZERO-${suffix}`, `TST-NEG-${suffix}`, `TST-POS-${suffix}`];
+    const vpns = [`TSTZERO${suffix}`, `TSTNEG${suffix}`, `TSTPOS${suffix}`];
     await client.query(
       `DELETE FROM stock_snapshots
        WHERE product_id IN (SELECT id FROM products WHERE vpn_normalized = ANY($1))`,
@@ -162,13 +168,14 @@ async function parseCsv(
 async function commitUpload(
   ctx: APIRequestContext,
   tempFileKey: string,
+  mapping = DICKER_MAPPING,
 ): Promise<{ rowCountMatched: number }> {
   const res = await ctx.post("/api/uploads/commit", {
     data: {
       distributorId: DICKER_DIST_ID,
       tempFileKey,
       snapshotDate: TEST_DATE,
-      mapping: DICKER_MAPPING,
+      mapping,
       sourceFormat: "csv",
       delimiter: ",",
     },
@@ -209,9 +216,9 @@ test("SOH=0 is stored as integer 0 and returned as 0 by comparison API; SOH=-5 p
     const rows = await dbSnapshotRows(suffix);
     expect(rows).toHaveLength(3);
 
-    const zeroRow = rows.find((r) => r.vpn_normalized === `TST-ZERO-${suffix}`);
-    const negRow  = rows.find((r) => r.vpn_normalized === `TST-NEG-${suffix}`);
-    const posRow  = rows.find((r) => r.vpn_normalized === `TST-POS-${suffix}`);
+    const zeroRow = rows.find((r) => r.vpn_normalized === `TSTZERO${suffix}`);
+    const negRow  = rows.find((r) => r.vpn_normalized === `TSTNEG${suffix}`);
+    const posRow  = rows.find((r) => r.vpn_normalized === `TSTPOS${suffix}`);
 
     expect(zeroRow).toBeDefined();
     expect(negRow).toBeDefined();
@@ -226,7 +233,7 @@ test("SOH=0 is stored as integer 0 and returned as 0 by comparison API; SOH=-5 p
 
     // ── API assertion: comparison route returns soh=0, not null ──────────────
     const compRes = await ctx.get(
-      `/api/comparison?brand=SAMSUNG&search=TST-ZERO-${suffix}`,
+      `/api/comparison?brand=SAMSUNG&search=TSTZERO${suffix}`,
     );
     expect(compRes.ok()).toBeTruthy();
 
@@ -235,7 +242,7 @@ test("SOH=0 is stored as integer 0 and returned as 0 by comparison API; SOH=-5 p
     const compBody = await compRes.json() as { rows: ProductRow[] };
 
     const product = compBody.rows.find(
-      (p) => p.vpnNormalized === `TST-ZERO-${suffix}`,
+      (p) => p.vpnNormalized === `TSTZERO${suffix}`,
     );
     expect(product).toBeDefined();
 
@@ -278,12 +285,134 @@ test("re-committing same distributor+date replaces snapshots — no duplicate ro
     expect(afterSecond).toHaveLength(3);
 
     // SOH values must be unchanged after the re-upload.
-    const zeroRow = afterSecond.find((r) => r.vpn_normalized === `TST-ZERO-${suffix}`);
-    const negRow  = afterSecond.find((r) => r.vpn_normalized === `TST-NEG-${suffix}`);
+    const zeroRow = afterSecond.find((r) => r.vpn_normalized === `TSTZERO${suffix}`);
+    const negRow  = afterSecond.find((r) => r.vpn_normalized === `TSTNEG${suffix}`);
     expect(zeroRow!.soh).toBe(0);
     expect(negRow!.soh).toBe(-5);
   } finally {
     await dbCleanup(suffix);
+    await ctx.dispose();
+  }
+});
+
+// ── Test 5 ───────────────────────────────────────────────────────────────────
+// Two uploads with different VPN formats (hyphen vs space) normalise to a single
+// product record; the second upload's price replaces the first.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("hyphen and space VPN variants normalise to one product — latest price wins", async () => {
+  const suffix = uid();
+  // Both "TST-NORM-${suffix}" and "TST NORM ${suffix}" strip to "TSTNORM${suffix}"
+  const csvHyphen = [
+    "StockCode,Vendor,DealerEx,StockAvailable,StockDescription",
+    `TST-NORM-${suffix},SAMSUNG,138.00,50,Test Norm Hyphen ${suffix}`,
+  ].join("\n");
+  const csvSpace = [
+    "StockCode,Vendor,DealerEx,StockAvailable,StockDescription",
+    `TST NORM ${suffix},SAMSUNG,124.00,40,Test Norm Space ${suffix}`,
+  ].join("\n");
+
+  const normalizedVpn = `TSTNORM${suffix}`;
+  const ctx = await getAdminApi();
+
+  async function cleanup() {
+    await withDb(async (client) => {
+      await client.query(
+        `DELETE FROM stock_snapshots
+         WHERE product_id IN (SELECT id FROM products WHERE vpn_normalized = $1)`,
+        [normalizedVpn],
+      );
+      await client.query(`DELETE FROM products WHERE vpn_normalized = $1`, [normalizedVpn]);
+    });
+  }
+
+  try {
+    // First upload — hyphenated VPN, price 138.
+    const key1 = await parseCsv(ctx, csvHyphen, `dicker-norm-hyph-${suffix}.csv`);
+    const { rowCountMatched: matched1 } = await commitUpload(ctx, key1);
+    expect(matched1).toBe(1);
+
+    // Second upload — spaced VPN, price 124. Must merge into existing product.
+    const key2 = await parseCsv(ctx, csvSpace, `dicker-norm-space-${suffix}.csv`);
+    const { rowCountMatched: matched2 } = await commitUpload(ctx, key2);
+    expect(matched2).toBe(1);
+
+    // DB: exactly one product with the normalised VPN.
+    const { rows: products } = await withDb((client) =>
+      client.query<{ id: number; vpn_normalized: string }>(
+        `SELECT id, vpn_normalized FROM products WHERE vpn_normalized = $1`,
+        [normalizedVpn],
+      ),
+    );
+    expect(products).toHaveLength(1);
+
+    // DB: that single product must have the latest price (124.00) from the second upload.
+    const { rows: snaps } = await withDb((client) =>
+      client.query<{ sell_price: string }>(
+        `SELECT DISTINCT ON (product_id, distributor_id) sell_price
+         FROM stock_snapshots
+         WHERE product_id = $1 AND distributor_id = $2
+         ORDER BY product_id, distributor_id, snapshot_date DESC, id DESC`,
+        [products[0].id, DICKER_DIST_ID],
+      ),
+    );
+    expect(snaps).toHaveLength(1);
+    expect(parseFloat(snaps[0].sell_price)).toBeCloseTo(124.0);
+  } finally {
+    await cleanup();
+    await ctx.dispose();
+  }
+});
+
+// ── Test 6 ───────────────────────────────────────────────────────────────────
+// U-POE+ and U-POE++ must remain two separate products after commit.
+// The + character is preserved in normalisation so these keys never collide.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("U-POE+ and U-POE++ committed together remain two separate products", async () => {
+  const suffix = uid();
+  // TST-POE+${suffix}  → TSTPOE+${suffix}
+  // TST-POE++${suffix} → TSTPOE++${suffix}
+  const csv = [
+    "StockCode,Vendor,DealerEx,StockAvailable,StockDescription",
+    `TST-POE+${suffix},NETGEAR,50.00,10,Test POE Plus ${suffix}`,
+    `TST-POE++${suffix},NETGEAR,80.00,5,Test POE PlusPlus ${suffix}`,
+  ].join("\n");
+
+  const vpnPlus     = `TSTPOE+${suffix}`;
+  const vpnPlusPlus = `TSTPOE++${suffix}`;
+  const ctx = await getAdminApi();
+
+  async function cleanup() {
+    await withDb(async (client) => {
+      const vpns = [vpnPlus, vpnPlusPlus];
+      await client.query(
+        `DELETE FROM stock_snapshots
+         WHERE product_id IN (SELECT id FROM products WHERE vpn_normalized = ANY($1))`,
+        [vpns],
+      );
+      await client.query(`DELETE FROM products WHERE vpn_normalized = ANY($1)`, [vpns]);
+    });
+  }
+
+  try {
+    const key = await parseCsv(ctx, csv, `dicker-poe-${suffix}.csv`);
+    const { rowCountMatched } = await commitUpload(ctx, key);
+    expect(rowCountMatched).toBe(2);
+
+    // DB: must have two distinct product records — one per + count.
+    const { rows } = await withDb((client) =>
+      client.query<{ vpn_normalized: string }>(
+        `SELECT vpn_normalized FROM products
+         WHERE vpn_normalized = ANY($1)`,
+        [[vpnPlus, vpnPlusPlus]],
+      ),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows.some((r) => r.vpn_normalized === vpnPlus)).toBe(true);
+    expect(rows.some((r) => r.vpn_normalized === vpnPlusPlus)).toBe(true);
+  } finally {
+    await cleanup();
     await ctx.dispose();
   }
 });

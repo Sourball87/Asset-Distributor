@@ -323,7 +323,8 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
 
       // Shared formula fragments for this row
       const aRef  = `A${r}`;
-      const norm  = `UPPER(SUBSTITUTE(TRIM(${aRef})," ",""))`;
+      // Strip space/hyphen/dot/comma/slash — + is preserved (PoE+, PoE++, NBD+)
+      const norm  = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef}),"-","")," ",""),".",""),",",""),"/",""))`;
       const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
       // guard prefix: IF(A{r}="","", ...inner... ) — inner must close with ))
       const g = `IF(${aRef}="","",`;
@@ -686,7 +687,8 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   for (let k = 0; k < M; k++) {
     const base   = PASTE_START + blockSize * k;
     const inref  = `INDEX($A$${PASTE_START}:$A$${PASTE_END},${k + 1})`;
-    const norm   = `UPPER(SUBSTITUTE(TRIM(${inref})," ",""))`;
+    // Strip space/hyphen/dot/comma/slash — + is preserved (PoE+, PoE++, NBD+)
+    const norm   = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${inref}),"-","")," ",""),".",""),",",""),"/",""))`;
     const mf     = `MATCH(${norm},DATA!$A:$A,0)`;
 
     // Thin separator across A–G on the Dicker row

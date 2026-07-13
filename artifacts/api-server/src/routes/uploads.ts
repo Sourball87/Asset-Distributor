@@ -33,7 +33,7 @@ const FINGERPRINTS: DistributorFingerprint[] = [
     namePattern: "dicker",
     signatures: ["StockCode", "VendorStockCode", "DealerEx", "StockAvailable"],
     mapping: {
-      vpn: "VendorStockCode",
+      vpn: "StockCode",
       brand: "Vendor",
       description: "StockDescription",
       sell_price: "DealerEx",
@@ -365,13 +365,18 @@ async function commitRowsBatched(
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
 
-  // Replace semantics: delete existing snapshots for this distributor + date so re-uploads don't duplicate
-  await db.delete(stockSnapshotsTable)
-    .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
+  // Replace semantics wrapped in a single transaction:
+  // delete existing snapshots for this distributor + date, then insert the new batch.
+  // Product upserts above intentionally remain outside — they are idempotent and
+  // safe to run before the transaction opens.
+  await db.transaction(async (tx) => {
+    await tx.delete(stockSnapshotsTable)
+      .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
 
-  for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
-    await db.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
-  }
+    for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
+      await tx.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
+    }
+  });
 
   return snapshots.length;
 }
