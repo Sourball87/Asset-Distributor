@@ -1,0 +1,29 @@
+Proceed with Stage 1 plus the match-rate analysis. Report results after each part. Change nothing beyond what Stage 1 specifies.
+
+PART A — STAGE 1 PURGE (single transaction)
+
+1. Identify products exclusive to upload 14: products whose ONLY stock_snapshots rows come from upload_id = 14.
+2. DELETE FROM stock_snapshots WHERE upload_id = 14.
+3. DELETE the now-orphaned products (no remaining snapshots from any upload/distributor). IMPORTANT: only delete products with zero remaining snapshots — products that also have Bluechip/Ingram/other distributor rows must survive.
+4. UPDATE uploads SET status = 'invalid_mapping' WHERE id = 14.
+5. Verify before COMMIT: zero snapshots reference upload 14; zero products have zero snapshots.
+
+Report: snapshot rows deleted, products deleted, products retained because other distributors reference them.
+
+PART B — MATCH-RATE ANALYSIS (read-only, run after Part A commits)
+
+Using only current valid data (Dicker uploads 17-30), measure cross-distributor match rates:
+
+For every product that has at least one Dicker snapshot, count how many also have at least one snapshot from each other distributor, under two keys:
+  (a) current vpn_normalized (as-is matching)
+  (b) proposed key: UPPER(REGEXP_REPLACE(vpn_normalized, '[^A-Za-z0-9+]', '', 'g'))
+
+For (b), simulate the merge: group products by the proposed key, then a Dicker product "matches" a competitor if ANY product sharing its key has a snapshot from that competitor.
+
+Report a table: competitor | dicker products matched under (a) | matched under (b) | total competitor products | match % (a) | match % (b).
+
+Also report: the 20 highest-value unmatched products under (b) (by Dicker sell_price DESC) per competitor, showing vpn_display — so we can eyeball whether misses are genuine catalogue differences or formatting we haven't handled.
+
+PART C — HOLD
+
+Do not run the merge migration, the normalizeVpn code change, or the duplicate-upload cleanup yet. Those proceed only after the match-rate results are reviewed. One code note for the upcoming Stage 4: the hardcoded Dicker fingerprint in uploads.ts still maps vpn to VendorStockCode — it must be changed to StockCode so the code matches the saved profile. Do not change it yet.
