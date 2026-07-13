@@ -312,6 +312,18 @@ export default function Comparison() {
             </p>
           )}
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs rounded-sm gap-1.5"
+          onClick={handleExport}
+          disabled={exporting || isLoading}
+        >
+          {exporting
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <FileDown className="h-3.5 w-3.5" />}
+          {exporting ? "Generating…" : "Export"}
+        </Button>
       </div>
 
       {/* Toolbar */}
@@ -346,19 +358,6 @@ export default function Comparison() {
           />
           Only where Dicker is most expensive
         </label>
-
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs rounded-sm gap-1.5 ml-auto"
-          onClick={handleExport}
-          disabled={exporting || isLoading}
-        >
-          {exporting
-            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            : <FileDown className="h-3.5 w-3.5" />}
-          {exporting ? "Generating…" : "Export"}
-        </Button>
 
         {isLoading && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
