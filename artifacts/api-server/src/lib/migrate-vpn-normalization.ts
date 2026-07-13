@@ -6,10 +6,17 @@ import { logger } from "./logger";
  * values are equivalent under the new normalization rule (strip everything
  * except [A-Z0-9+]) and clean up stale snapshot rows from superseded uploads.
  *
- * Safe to run on every startup — the quick-check query exits early if there
- * is nothing to do (i.e. every vpn_normalized is already fully stripped).
+ * Production-only — exits immediately in non-production environments.
+ * Idempotent — the quick-check query exits early when the DB is already clean.
+ * Must be awaited before app.listen() to prevent concurrent upload writes
+ * from racing the migration transaction.
  */
 export async function migrateVpnNormalization(): Promise<void> {
+  if (process.env.NODE_ENV !== "production") {
+    logger.info("migrateVpnNormalization: non-production environment — skipping");
+    return;
+  }
+
   const client = await pool.connect();
   try {
     // Quick-check: are there any products whose vpn_normalized still contains

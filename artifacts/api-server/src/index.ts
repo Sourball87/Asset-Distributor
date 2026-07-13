@@ -21,9 +21,17 @@ seedIfEmpty().catch((err) => {
   logger.error({ err }, "Seed failed");
 });
 
-migrateVpnNormalization().catch((err) => {
-  logger.error({ err }, "VPN normalization migration failed");
-});
+// Run the one-time VPN normalization migration before accepting traffic.
+// Awaiting here blocks app.listen so no upload commits can race the migration.
+// The function is production-only and idempotent — it exits in ~1ms when the
+// DB is already clean.
+try {
+  await migrateVpnNormalization();
+} catch (err) {
+  // Log and continue — a failed migration must not prevent the server from
+  // starting; the grid will show duplicates but data will not be corrupted.
+  logger.error({ err }, "VPN normalization migration failed — server starting anyway");
+}
 
 app.listen(port, (err) => {
   if (err) {
