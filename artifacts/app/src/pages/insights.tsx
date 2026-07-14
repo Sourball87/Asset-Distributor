@@ -19,7 +19,7 @@ interface RepriceTarget {
   dicker_price: number;
   cheapest_comp_price: number;
   cheapest_comp_name: string;
-  cheapest_instock_comp_soh: number;
+  cheapest_comp_soh: number;
   gap_dollars: number;
   gap_pct: number;
   dicker_soh: number;
@@ -403,7 +403,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
         <div>
           <SectionHeader
             title="Top reprice targets"
-            sub="Ranked by dollar gap vs cheapest in-stock competitor — your to-do list"
+            sub="Ranked by dollar gap vs cheapest competitor — your to-do list"
             onExport={() => doExport("reprice")}
             exporting={exportingSection === "reprice"}
           />
@@ -433,7 +433,7 @@ function PriceTab({ data, doExport, exportingSection }: TabProps) {
                     <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmt$(r.gap_dollars)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-red-600">{fmtGapPct(r.gap_pct)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.dicker_soh)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.cheapest_instock_comp_soh)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmtN(r.cheapest_comp_soh)}</td>
                   </tr>
                 ))}
               </tbody>
