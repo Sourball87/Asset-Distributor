@@ -105,10 +105,14 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     snapMap.set(`${r.product_id}:${r.distributor_id}`, r);
   }
 
-  // ── 5a. Horizontal format (formula-driven, paste-column input) ──
+  // ── 5a. Horizontal format (formula-driven, two-tab: paste + compare) ──
   if (req.query.format === "horizontal") {
-    // COMPARISON sheet column layout (1-based):
-    //   1 = paste VPN (yellow)       — user pastes SKUs here
+    // Tab 1 "PASTE SKUs HERE": freshness table + yellow paste column (A) + brand (B) + desc (C)
+    // Tab 2 "COMPARE PRICING": VPN (A, ref from Tab1) + brand + desc + Dicker + competitors
+    //   All Tab 2 formulas reference 'PASTE SKUs HERE'!A{pasteRow} for the VPN lookup
+    //
+    // COMPARE PRICING column layout (1-based):
+    //   1 = VPN (ref from Tab 1)     — mirrors paste column
     //   2 = Brand                    — formula from DATA
     //   3 = Description              — formula from DATA
     //   4 = Dicker SOH               — formula from DATA
@@ -136,7 +140,8 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
 
     const hwb     = new ExcelJS.Workbook();
     hwb.creator   = "DistiBench";
-    const hws     = hwb.addWorksheet("COMPARISON");
+    const hws1    = hwb.addWorksheet("PASTE SKUs HERE");
+    const hws     = hwb.addWorksheet("COMPARE PRICING");
     const hDataWs = hwb.addWorksheet("DATA", { state: "veryHidden" });
 
     // ── DATA sheet (row 1 = first product, no header) ──
@@ -161,8 +166,135 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       hDataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
     }
 
-    // ── COMPARISON sheet column widths ──
-    hws.getColumn(1).width = 22;  // A: paste VPN
+    const M      = 300;
+    const thinIN = thin(IN_BORDER);
+    const grpLeft: Partial<ExcelJS.Border> = { style: "medium", color: { argb: BLK_BORDER } };
+
+    // ═══════════════════════════════════════════════
+    // TAB 1 — PASTE SKUs HERE
+    // ═══════════════════════════════════════════════
+    hws1.getColumn(1).width = 22; // A: paste VPN
+    hws1.getColumn(2).width = 10; // B: brand
+    hws1.getColumn(3).width = 40; // C: description
+
+    // Row 1: Title
+    hws1.getRow(1).height = 30;
+    hws1.mergeCells(1, 1, 1, 4);
+    const t1Title = hws1.getCell(1, 1);
+    t1Title.value     = "DICKER DATA — PRICE & STOCK LOOKUP";
+    t1Title.font      = fnt({ bold: true, size: 14, color: { argb: WHITE } });
+    t1Title.fill      = solid(DARK);
+    t1Title.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Row 3: Freshness label
+    hws1.mergeCells(3, 1, 3, 4);
+    const t1FpLabel = hws1.getCell(3, 1);
+    t1FpLabel.value = "PRICE FILE FRESHNESS — how current each distributor's feed is";
+    t1FpLabel.font  = fnt({ bold: true, color: { argb: DARK } });
+
+    // Row 4: Freshness column headers
+    ["Distributor", "Price file date", "Days old", "Status"].forEach((h, i) => {
+      const c = hws1.getCell(4, i + 1);
+      c.value     = h;
+      c.font      = fnt({ bold: true, size: 9, color: { argb: WHITE } });
+      c.fill      = solid(GREY);
+      c.alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    // Rows 5+: Per-distributor freshness
+    const t1FreshnessLines = [
+      { label: "Dicker Data", dist: dickerDist },
+      ...competitors.map((d) => ({ label: d.name, dist: d })),
+    ];
+    t1FreshnessLines.forEach(({ label, dist }, idx) => {
+      const rn    = 5 + idx;
+      const aCell = hws1.getCell(rn, 1);
+      aCell.value = label;
+      aCell.font  = fnt({ bold: true, color: { argb: DARK } });
+      const bCell    = hws1.getCell(rn, 2);
+      const lastDate = dist ? freshnessMap.get(dist.id) : null;
+      if (lastDate) {
+        bCell.value  = new Date(lastDate + "T00:00:00");
+        bCell.numFmt = "dd/mm/yyyy";
+      } else {
+        bCell.value = "No data";
+      }
+      const cCell = hws1.getCell(rn, 3);
+      cCell.value     = { formula: `TODAY()-B${rn}` };
+      cCell.numFmt    = "0";
+      cCell.alignment = { horizontal: "center" };
+      const dCell = hws1.getCell(rn, 4);
+      dCell.value = { formula: `IF(C${rn}<=1,"current",IF(C${rn}<=3,"ageing — consider refresh","STALE — upload a new file"))` };
+      dCell.font  = fnt({ bold: true });
+    });
+    const t1FreshnessEnd = 4 + t1FreshnessLines.length;
+    hws1.addConditionalFormatting({
+      ref: `D5:D${t1FreshnessEnd}`,
+      rules: [
+        { type: "expression", priority: 1, formulae: [`$C5>3`],             style: { font: { bold: true, color: { argb: RED_C   } } } },
+        { type: "expression", priority: 2, formulae: [`AND($C5>1,$C5<=3)`], style: { font: { bold: true, color: { argb: AMBER_C } } } },
+        { type: "expression", priority: 3, formulae: [`$C5<=1`],            style: { font: { bold: true, color: { argb: GREEN_C } } } },
+      ],
+    });
+
+    // Instruction row
+    const T1_INSTR_ROW = t1FreshnessEnd + 2;
+    hws1.mergeCells(T1_INSTR_ROW, 1, T1_INSTR_ROW, 4);
+    const t1InstrCell = hws1.getCell(T1_INSTR_ROW, 1);
+    t1InstrCell.value = "Paste your SKUs into the yellow column below, then switch to the COMPARE PRICING tab to see live competitor pricing.";
+    t1InstrCell.font  = fnt({ italic: true, color: { argb: GREY } });
+
+    // Header row
+    const T1_HDR_ROW    = T1_INSTR_ROW + 2;
+    const T1_PASTE_START = T1_HDR_ROW + 1;
+    hws1.getRow(T1_HDR_ROW).height = 16;
+    [{ lbl: "PASTE SKUs ▼", col: 1 }, { lbl: "Brand", col: 2 }, { lbl: "Description", col: 3 }].forEach(({ lbl, col }) => {
+      const c = hws1.getCell(T1_HDR_ROW, col);
+      c.value     = lbl;
+      c.font      = fnt({ bold: true, color: { argb: WHITE } });
+      c.fill      = solid(DARK);
+      c.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
+    });
+
+    hws1.views = [{ showGridLines: true, state: "frozen", xSplit: 0, ySplit: T1_HDR_ROW }];
+
+    // 300 paste rows on Tab 1
+    for (let k = 0; k < M; k++) {
+      const r = T1_PASTE_START + k;
+
+      const pasteCell = hws1.getCell(r, 1);
+      pasteCell.fill   = solid(INFILL);
+      pasteCell.font   = fnt({ color: { argb: DARK } });
+      pasteCell.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
+
+      const aRef1 = `A${r}`;
+      const norm1 = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef1}),"-","")," ",""),".",""),",",""),"/",""))`;
+      const mf1   = `MATCH(${norm1},DATA!$A:$A,0)`;
+      const g1    = `IF(${aRef1}="","",`;
+
+      const brandCell = hws1.getCell(r, 2);
+      brandCell.value = { formula: `${g1}IFERROR(INDEX(DATA!$B:$B,${mf1}),"— not found —"))` };
+      brandCell.font  = fnt({ color: { argb: DARK } });
+
+      const descCell = hws1.getCell(r, 3);
+      descCell.value = { formula: `${g1}IFERROR(INDEX(DATA!$C:$C,${mf1}),"— not found —"))` };
+      descCell.font  = fnt({ color: { argb: DARK } });
+
+      if (k % 2 === 1) {
+        for (let col = 2; col <= 3; col++) {
+          const cell = hws1.getCell(r, col);
+          const ex   = cell.fill as ExcelJS.FillPattern | undefined;
+          if (!ex?.fgColor?.argb || ex.fgColor.argb === WHITE) {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+          }
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════
+    // TAB 2 — COMPARE PRICING
+    // ═══════════════════════════════════════════════
+    hws.getColumn(1).width = 22;  // A: VPN (ref from Tab 1)
     hws.getColumn(2).width = 10;  // B: brand
     hws.getColumn(3).width = 40;  // C: description
     hws.getColumn(4).width = 9;   // D: dicker soh
@@ -176,7 +308,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     hws.getColumn(COL_CHEAPEST).width = 18;
     hws.getColumn(COL_FLAG).width     = 7;
 
-    // ── Row 1: Title ──
+    // Row 1: Title
     hws.getRow(1).height = 30;
     hws.mergeCells(1, 1, 1, TOTAL_COLS);
     const htitle = hws.getCell(1, 1);
@@ -185,68 +317,9 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     htitle.fill      = solid(DARK);
     htitle.alignment = { horizontal: "center", vertical: "middle" };
 
-    // ── Row 3: Freshness label ──
-    hws.mergeCells(3, 1, 3, TOTAL_COLS);
-    const hfpLabel = hws.getCell(3, 1);
-    hfpLabel.value = "PRICE FILE FRESHNESS — how current each distributor's feed is";
-    hfpLabel.font  = fnt({ bold: true, color: { argb: DARK } });
-
-    // ── Row 4: Freshness column headers ──
-    ["Distributor", "Price file date", "Days old", "Status"].forEach((h, i) => {
-      const c = hws.getCell(4, i + 1);
-      c.value     = h;
-      c.font      = fnt({ bold: true, size: 9, color: { argb: WHITE } });
-      c.fill      = solid(GREY);
-      c.alignment = { horizontal: "center", vertical: "middle" };
-    });
-
-    // ── Rows 5+: Per-distributor freshness ──
-    const hFreshnessLines = [
-      { label: "Dicker Data", dist: dickerDist },
-      ...competitors.map((d) => ({ label: d.name, dist: d })),
-    ];
-    hFreshnessLines.forEach(({ label, dist }, idx) => {
-      const rn    = 5 + idx;
-      const aCell = hws.getCell(rn, 1);
-      aCell.value = label;
-      aCell.font  = fnt({ bold: true, color: { argb: DARK } });
-      const bCell    = hws.getCell(rn, 2);
-      const lastDate = dist ? freshnessMap.get(dist.id) : null;
-      if (lastDate) {
-        bCell.value  = new Date(lastDate + "T00:00:00");
-        bCell.numFmt = "dd/mm/yyyy";
-      } else {
-        bCell.value = "No data";
-      }
-      const cCell = hws.getCell(rn, 3);
-      cCell.value     = { formula: `TODAY()-B${rn}` };
-      cCell.numFmt    = "0";
-      cCell.alignment = { horizontal: "center" };
-      const dCell = hws.getCell(rn, 4);
-      dCell.value = { formula: `IF(C${rn}<=1,"current",IF(C${rn}<=3,"ageing — consider refresh","STALE — upload a new file"))` };
-      dCell.font  = fnt({ bold: true });
-    });
-    const hFreshnessEnd = 4 + hFreshnessLines.length;
-    hws.addConditionalFormatting({
-      ref: `D5:D${hFreshnessEnd}`,
-      rules: [
-        { type: "expression", priority: 1, formulae: [`$C5>3`],             style: { font: { bold: true, color: { argb: RED_C   } } } },
-        { type: "expression", priority: 2, formulae: [`AND($C5>1,$C5<=3)`], style: { font: { bold: true, color: { argb: AMBER_C } } } },
-        { type: "expression", priority: 3, formulae: [`$C5<=1`],            style: { font: { bold: true, color: { argb: GREEN_C } } } },
-      ],
-    });
-
-    // ── Instruction row ──
-    const INSTR_ROW = hFreshnessEnd + 2;
-    hws.mergeCells(INSTR_ROW, 1, INSTR_ROW, TOTAL_COLS);
-    const instrCell = hws.getCell(INSTR_ROW, 1);
-    instrCell.value = "Paste a list of SKUs into the yellow column (column A). Each row auto-populates with price and stock data across all distributors.";
-    instrCell.font  = fnt({ italic: true, color: { argb: GREY } });
-
-    // ── GRP_ROW: Distributor group headers ──
-    const GRP_ROW = INSTR_ROW + 2;
+    // Row 3: Distributor group headers
+    const GRP_ROW = 3;
     hws.getRow(GRP_ROW).height = 18;
-
     const grpBorderLeft: Partial<ExcelJS.Border> = { style: "medium", color: { argb: BLK_BORDER } };
 
     hws.mergeCells(GRP_ROW, 4, GRP_ROW, 5);
@@ -267,15 +340,14 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       gc.border    = { left: grpBorderLeft };
     });
 
-    // Left border on Cheapest column in GRP_ROW (no label, just the divider)
     hws.getCell(GRP_ROW, COL_CHEAPEST).border = { left: grpBorderLeft };
 
-    // ── HDR_ROW: Sub-header row ──
-    const HDR_ROW = GRP_ROW + 1;
+    // Row 4: Sub-header row
+    const HDR_ROW = 4;
     hws.getRow(HDR_ROW).height = 16;
 
     const subHdrs: Array<{ col: number; label: string }> = [
-      { col: 1, label: "PASTE SKUs ▼" },
+      { col: 1, label: "VPN" },
       { col: 2, label: "Brand" },
       { col: 3, label: "Description" },
       { col: 4, label: "SOH" },
@@ -290,9 +362,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     subHdrs.push({ col: COL_CHEAPEST, label: "Cheapest" });
     subHdrs.push({ col: COL_FLAG,     label: "DD ↑" });
 
-    // Columns that start a new distributor group — get a medium left border
     const grpDividerCols = new Set([4, ...competitors.map((_, i) => compColSoh(i)), COL_CHEAPEST]);
-
     subHdrs.forEach(({ col, label }) => {
       const c = hws.getCell(HDR_ROW, col);
       c.value     = label;
@@ -302,59 +372,50 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       if (grpDividerCols.has(col)) c.border = { left: grpBorderLeft };
     });
 
-    // Freeze first 3 cols (paste/brand/desc) and all header rows
+    // Freeze first 3 cols (VPN/brand/desc) and header rows
     hws.views = [{ showGridLines: true, state: "frozen", xSplit: 3, ySplit: HDR_ROW }];
 
-    // ── Formula rows (M paste slots) ──
+    // 300 formula rows — each row references Tab 1's paste column for the VPN
     const DATA_START = HDR_ROW + 1;
-    const M          = 300;
-    const thinIN     = thin(IN_BORDER);
-    // Medium left border for group dividers — defined once, reused in every data row
-    const grpLeft: Partial<ExcelJS.Border> = { style: "medium", color: { argb: BLK_BORDER } };
 
     for (let k = 0; k < M; k++) {
-      const r = DATA_START + k;
+      const r   = DATA_START + k;
+      const t1r = T1_PASTE_START + k;
+      // Cross-sheet reference to Tab 1's paste cell
+      const aRef = `'PASTE SKUs HERE'!A${t1r}`;
+      const norm = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef}),"-","")," ",""),".",""),",",""),"/",""))`;
+      const mf   = `MATCH(${norm},DATA!$A:$A,0)`;
+      const g    = `IF(${aRef}="","",`;
 
-      // Col A — yellow paste cell
-      const pasteCell = hws.getCell(r, 1);
-      pasteCell.fill   = solid(INFILL);
-      pasteCell.font   = fnt({ color: { argb: DARK } });
-      pasteCell.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
+      // Col A: VPN mirrored from Tab 1 (read-only reference, no yellow)
+      const vpnCell = hws.getCell(r, 1);
+      vpnCell.value = { formula: `IF(${aRef}="","",${aRef})` };
+      vpnCell.font  = fnt({ bold: true, color: { argb: DARK } });
 
-      // Shared formula fragments for this row
-      const aRef  = `A${r}`;
-      // Strip space/hyphen/dot/comma/slash — + is preserved (PoE+, PoE++, NBD+)
-      const norm  = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef}),"-","")," ",""),".",""),",",""),"/",""))`;
-      const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
-      // guard prefix: IF(A{r}="","", ...inner... ) — inner must close with ))
-      const g = `IF(${aRef}="","",`;
-
-      // Col B — Brand
+      // Col B: Brand
       const brandCell = hws.getCell(r, 2);
       brandCell.value = { formula: `${g}IFERROR(INDEX(DATA!$B:$B,${mf}),"— not found —"))` };
       brandCell.font  = fnt({ color: { argb: DARK } });
 
-      // Col C — Description
+      // Col C: Description
       const descCell = hws.getCell(r, 3);
       descCell.value = { formula: `${g}IFERROR(INDEX(DATA!$C:$C,${mf}),"— not found —"))` };
       descCell.font  = fnt({ color: { argb: DARK } });
 
-      // Col D — Dicker SOH (left border = start of Dicker group)
+      // Col D: Dicker SOH
       const dkSohCell = hws.getCell(r, 4);
       dkSohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$D:$D,${mf}),""))` };
       dkSohCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkSohCell.alignment = { horizontal: "center" };
       dkSohCell.border    = { left: grpLeft };
 
-      // Col E — Dicker Price
-      // Guard: if DATA returns 0 (no data), show "not listed"
+      // Col E: Dicker Price
       const dkPriceCell = hws.getCell(r, 5);
       dkPriceCell.value     = { formula: `${g}IFERROR(IF(INDEX(DATA!$E:$E,${mf})=0,"not listed",INDEX(DATA!$E:$E,${mf})),"not listed"))` };
       dkPriceCell.font      = fnt({ bold: true, color: { argb: DARK } });
       dkPriceCell.numFmt    = "$#,##0.00";
       dkPriceCell.alignment = { horizontal: "center" };
 
-      // Competitor columns — collect price cell refs for cheapest/flag formulas
       const compPriceRefs: string[] = [];
       for (let i = 0; i < numComp; i++) {
         const dataSOHLtr   = colLetter(dataColCompSoh(i));
@@ -362,28 +423,24 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         const priceLtr     = colLetter(compColPrice(i));
         compPriceRefs.push(`${priceLtr}${r}`);
 
-        // SOH (left border = start of this competitor's group)
         const sohCell = hws.getCell(r, compColSoh(i));
         sohCell.value     = { formula: `${g}IFERROR(INDEX(DATA!$${dataSOHLtr}:$${dataSOHLtr},${mf}),""))` };
         sohCell.font      = fnt({ color: { argb: DARK } });
         sohCell.alignment = { horizontal: "center" };
         sohCell.border    = { left: grpLeft };
 
-        // Price — guard $0 as "not listed"
         const priceCell = hws.getCell(r, compColPrice(i));
         priceCell.value     = { formula: `${g}IFERROR(IF(INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf})=0,"not listed",INDEX(DATA!$${dataPriceLtr}:$${dataPriceLtr},${mf})),"not listed"))` };
         priceCell.font      = fnt({ color: { argb: DARK } });
         priceCell.numFmt    = "$#,##0.00";
         priceCell.alignment = { horizontal: "center" };
 
-        // Δ$ — competitor price minus Dicker price (ISNUMBER guards handle "not listed" text)
         const deltaCell = hws.getCell(r, compColDelta(i));
         deltaCell.value     = { formula: `IF(OR(NOT(ISNUMBER(E${r})),NOT(ISNUMBER(${priceLtr}${r}))),"",${priceLtr}${r}-E${r})` };
         deltaCell.numFmt    = `$#,##0.00`;
         deltaCell.alignment = { horizontal: "center" };
         deltaCell.font      = fnt({ color: { argb: DARK } });
 
-        // Δ% — (competitor - dicker) / dicker
         const dpctCell = hws.getCell(r, compColDPct(i));
         dpctCell.value     = { formula: `IF(OR(NOT(ISNUMBER(E${r})),NOT(ISNUMBER(${priceLtr}${r})),E${r}=0),"",( ${priceLtr}${r}-E${r})/E${r})` };
         dpctCell.numFmt    = `+0.0%;-0.0%;`;
@@ -391,7 +448,6 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         dpctCell.font      = fnt({ color: { argb: DARK } });
       }
 
-      // Cheapest — MIN price across all competitor price cells in this row
       const cheapestCell = hws.getCell(r, COL_CHEAPEST);
       cheapestCell.font      = fnt({ bold: true, color: { argb: TEAL } });
       cheapestCell.numFmt    = "$#,##0.00";
@@ -401,38 +457,33 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         cheapestCell.value = "";
       } else {
         const priceList = compPriceRefs.join(",");
-        // COUNT ignores text ("not listed") so only numeric prices contribute to MIN
         cheapestCell.value = { formula: `IF(OR(${aRef}="",COUNT(${priceList})=0),"",MIN(${priceList}))` };
       }
 
-      // DD↑ — flag when Dicker is more expensive than the cheapest competitor
       const flagCell = hws.getCell(r, COL_FLAG);
       flagCell.font      = fnt({ bold: true, color: { argb: RED_C } });
       flagCell.alignment = { horizontal: "center" };
       if (numComp === 0) {
         flagCell.value = "";
       } else {
-        const minExpr  = `MIN(${compPriceRefs.join(",")})`;
+        const minExpr   = `MIN(${compPriceRefs.join(",")})`;
         const priceList = compPriceRefs.join(",");
         flagCell.value = { formula: `IF(OR(${aRef}="",NOT(ISNUMBER(E${r})),COUNT(${priceList})=0),"",IF(E${r}>${minExpr},"⚑",""))` };
       }
 
-      // Zebra stripe (cols 2 onwards — col A stays always yellow)
+      // Zebra stripe
       if (k % 2 === 1) {
-        for (let col = 2; col <= TOTAL_COLS; col++) {
-          const cell     = hws.getCell(r, col);
-          const existing = cell.fill as ExcelJS.FillPattern | undefined;
-          if (!existing?.fgColor?.argb || existing.fgColor.argb === WHITE) {
+        for (let col = 1; col <= TOTAL_COLS; col++) {
+          const cell = hws.getCell(r, col);
+          const ex   = cell.fill as ExcelJS.FillPattern | undefined;
+          if (!ex?.fgColor?.argb || ex.fgColor.argb === WHITE) {
             cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
           }
         }
       }
-
     }
 
-    // ── CF: competitor price, Δ$, Δ% columns ──
-    // Price: red when cheaper than Dicker, green when more expensive
-    // Δ$ / Δ%: red when negative (competitor cheaper), green when positive
+    // ── CF on COMPARE PRICING: competitor price, Δ$, Δ% ──
     for (let i = 0; i < numComp; i++) {
       const pLtr     = colLetter(compColPrice(i));
       const deltaLtr = colLetter(compColDelta(i));
@@ -440,7 +491,6 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       const first    = DATA_START;
       const last     = DATA_START + M - 1;
 
-      // Price column
       hws.addConditionalFormatting({
         ref: `${pLtr}${first}:${pLtr}${last}`,
         rules: [
@@ -457,7 +507,6 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         ],
       });
 
-      // Δ$ column — negative = competitor cheaper = red
       hws.addConditionalFormatting({
         ref: `${deltaLtr}${first}:${deltaLtr}${last}`,
         rules: [
@@ -474,7 +523,6 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
         ],
       });
 
-      // Δ% column — same sign logic
       hws.addConditionalFormatting({
         ref: `${dpctLtr}${first}:${dpctLtr}${last}`,
         rules: [
