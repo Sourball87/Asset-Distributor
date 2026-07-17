@@ -121,9 +121,9 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       field: "description",
       headerName: "Description",
       pinned: "left",
-      flex: 1,
+      width: 260,
       minWidth: 160,
-      maxWidth: 320,
+      maxWidth: 360,
       tooltipField: "description",
     },
   ];
