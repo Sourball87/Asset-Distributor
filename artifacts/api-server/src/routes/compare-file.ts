@@ -268,7 +268,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       pasteCell.border = { top: thinIN, bottom: thinIN, left: thinIN, right: thinIN };
 
       const aRef1 = `A${r}`;
-      const norm1 = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef1}),"-","")," ",""),".",""),",",""),"/",""))`;
+      const norm1 = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef1}),"-","")," ",""),".",""),",",""),"/",""),"_",""))`;
       const mf1   = `MATCH(${norm1},DATA!$A:$A,0)`;
       const g1    = `IF(${aRef1}="","",`;
 
@@ -383,7 +383,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       const t1r = T1_PASTE_START + k;
       // Cross-sheet reference to Tab 1's paste cell
       const aRef = `'PASTE SKUs HERE'!A${t1r}`;
-      const norm = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef}),"-","")," ",""),".",""),",",""),"/",""))`;
+      const norm = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${aRef}),"-","")," ",""),".",""),",",""),"/",""),"_",""))`;
       const mf   = `MATCH(${norm},DATA!$A:$A,0)`;
       const g    = `IF(${aRef}="","",`;
 
@@ -748,7 +748,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   for (let k = 0; k < M; k++) {
     const base  = CARD_START + blockSize * k;
     const inref = `INDEX('PASTE SKUs HERE'!$A$${V_PASTE_START}:$A$${V_PASTE_END},${k + 1})`;
-    const norm  = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${inref}),"-","")," ",""),".",""),",",""),"/",""))`;
+    const norm  = `UPPER(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(TRIM(${inref}),"-","")," ",""),".",""),",",""),"/",""),"_",""))`;
     const mf    = `MATCH(${norm},DATA!$A:$A,0)`;
 
     // Top border across all 5 cols on the Dicker row
