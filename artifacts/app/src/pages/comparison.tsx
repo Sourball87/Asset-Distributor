@@ -16,8 +16,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, FileDown } from "lucide-react";
+import { Loader2, AlertCircle, FileDown, ChevronDown } from "lucide-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -225,6 +227,7 @@ export default function Comparison() {
   const [searchInput, setSearchInput] = useState("");
   const [searchParam, setSearchParam] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [selectedDistIds, setSelectedDistIds] = useState<Set<number>>(new Set());
 
   const { data: brandsData } = useListBrands();
   const brands = brandsData ?? [];
@@ -247,7 +250,35 @@ export default function Comparison() {
   });
 
   const distributors: Distributor[] = useMemo(() => data?.distributors ?? [], [data]);
-  const colDefs = useMemo(() => buildColumns(distributors), [distributors]);
+
+  // Initialise selection to all distributors when data first arrives
+  useEffect(() => {
+    if (distributors.length > 0 && selectedDistIds.size === 0) {
+      setSelectedDistIds(new Set(distributors.map((d) => d.id)));
+    }
+  }, [distributors, selectedDistIds.size]);
+
+  // Competitors visible in the grid (baseline is always shown)
+  const visibleDistributors = useMemo(
+    () => distributors.filter((d) => d.isBaseline || selectedDistIds.has(d.id)),
+    [distributors, selectedDistIds],
+  );
+
+  const colDefs = useMemo(() => buildColumns(visibleDistributors), [visibleDistributors]);
+
+  const competitors = useMemo(() => distributors.filter((d) => !d.isBaseline), [distributors]);
+
+  function toggleDist(id: number) {
+    setSelectedDistIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll(on: boolean) {
+    setSelectedDistIds(on ? new Set(distributors.map((d) => d.id)) : new Set());
+  }
 
   const rowData = useMemo(() => {
     const flat = flattenRows(data?.rows ?? []);
@@ -343,6 +374,45 @@ export default function Comparison() {
             ))}
           </SelectContent>
         </Select>
+
+        {competitors.length > 0 && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs rounded-sm gap-1.5 font-normal">
+                Distributors
+                {selectedDistIds.size < distributors.length && (
+                  <span className="ml-0.5 text-primary font-semibold">
+                    ({selectedDistIds.size - (distributors.find(d => d.isBaseline) ? 1 : 0)}/{competitors.length})
+                  </span>
+                )}
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-52 p-2">
+              <div className="flex items-center justify-between mb-2 pb-2 border-b">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Competitors</span>
+                <div className="flex gap-2">
+                  <button onClick={() => toggleAll(true)} className="text-xs text-primary hover:underline">All</button>
+                  <button onClick={() => toggleAll(false)} className="text-xs text-primary hover:underline">None</button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {competitors.map((d) => (
+                  <label key={d.id} className="flex items-center gap-2 cursor-pointer group">
+                    <Checkbox
+                      checked={selectedDistIds.has(d.id)}
+                      onCheckedChange={() => toggleDist(d.id)}
+                      className="h-3.5 w-3.5 rounded-sm"
+                    />
+                    <span className="text-xs group-hover:text-foreground text-muted-foreground transition-colors">
+                      {d.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
 
         <Input
           value={searchInput}
