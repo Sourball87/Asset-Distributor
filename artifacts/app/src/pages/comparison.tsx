@@ -152,6 +152,8 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
     };
 
     if (d.isBaseline) {
+      priceCol.pinned = "left";
+      sohCol.pinned   = "left";
       return {
         headerName: d.name + " ★",
         children: [priceCol, sohCol],
