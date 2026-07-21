@@ -43,7 +43,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/comparison", label: "Comparison", icon: Grid },
+    { href: "/comparison", label: "Competition Check", icon: Grid },
     { href: "/insights", label: "Insights", icon: TrendingUp },
     ...(!isUser ? [{ href: "/import", label: "Import", icon: Upload }] : []),
   ];
@@ -113,7 +113,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto p-4 bg-muted/30">
-          <div className="mx-auto max-w-6xl">
+          <div className={`mx-auto ${location === "/comparison" ? "w-full" : "max-w-6xl"}`}>
             {children}
           </div>
         </main>

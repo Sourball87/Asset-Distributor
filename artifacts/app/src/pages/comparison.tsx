@@ -44,7 +44,7 @@ const gridTheme = themeQuartz.withParams({
 
 function fmtPrice(v: number | null | undefined): string {
   if (v == null) return "—";
-  return `$${v.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${Math.round(v).toLocaleString("en-AU")}`;
 }
 
 function fmtSoh(v: number | null | undefined): string {
@@ -54,13 +54,13 @@ function fmtSoh(v: number | null | undefined): string {
 
 function fmtDelta(v: number | null | undefined): string {
   if (v == null) return "—";
-  const abs = Math.abs(v).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return v < 0 ? `-$${abs} ▲` : `+$${abs} ▼`;
+  const abs = Math.round(Math.abs(v)).toLocaleString("en-AU");
+  return v < 0 ? `-$${abs}` : `+$${abs}`;
 }
 
 function fmtDeltaPct(v: number | null | undefined): string {
   if (v == null) return "—";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  return `${v >= 0 ? "+" : ""}${Math.round(v)}%`;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +135,10 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       headerName: "Price",
       colId: `d${d.id}_price`,
       field: `d${d.id}_price`,
-      width: 95,
+      width: 88,
       type: "rightAligned",
+      cellClass: "dist-group-start",
+      headerClass: "dist-group-start",
       cellStyle: MONO,
       valueFormatter: (p: ValueFormatterParams) => fmtPrice(p.value as number | null),
       comparator: (a: number | null, b: number | null) => (a ?? -Infinity) - (b ?? -Infinity),
@@ -163,10 +165,10 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
     }
 
     const deltaCol: ColDef = {
-      headerName: "Δ vs Dicker",
+      headerName: "$ Diff",
       colId: `d${d.id}_delta`,
       field: `d${d.id}_delta`,
-      width: 108,
+      width: 88,
       type: "rightAligned",
       cellStyle: (p: CellClassParams): CellStyle => {
         const v = p.value as number | null;
@@ -178,7 +180,7 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
     };
 
     const deltaPctCol: ColDef = {
-      headerName: "Δ %",
+      headerName: "% Diff",
       colId: `d${d.id}_deltaPct`,
       field: `d${d.id}_deltaPct`,
       width: 66,
@@ -198,23 +200,7 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
     };
   });
 
-  const flagsGroup: ColGroupDef = {
-    headerName: "Flags",
-    children: [
-      {
-        headerName: "DD ↑",
-        colId: "dickerIsMostExpensive",
-        field: "dickerIsMostExpensive",
-        width: 54,
-        headerTooltip: "Dicker Data is the most expensive among all distributors with data",
-        cellStyle: { ...MONO, color: "#dc2626", textAlign: "center" } as CellStyle,
-        valueFormatter: (p: ValueFormatterParams) => (p.value ? "⚑" : ""),
-        comparator: (a: boolean, b: boolean) => Number(a) - Number(b),
-      },
-    ],
-  };
-
-  return [...leftPinned, ...distGroups, flagsGroup];
+  return [...leftPinned, ...distGroups];
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +318,7 @@ export default function Comparison() {
       {/* Page header */}
       <div className="flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Comparison Grid</h1>
+          <h1 className="text-xl font-bold tracking-tight">Competition Check</h1>
           {data && !isLoading && (
             <p className="text-xs text-muted-foreground mt-0.5">
               {(total ?? rowData.length).toLocaleString()} products
@@ -475,6 +461,12 @@ export default function Comparison() {
       <style>{`
         .row-dicker-expensive {
           background-color: #fff1f2 !important;
+        }
+        .ag-cell.dist-group-start {
+          border-left: 2px solid #94a3b8 !important;
+        }
+        .ag-header-cell.dist-group-start {
+          border-left: 2px solid #94a3b8 !important;
         }
       `}</style>
     </div>
