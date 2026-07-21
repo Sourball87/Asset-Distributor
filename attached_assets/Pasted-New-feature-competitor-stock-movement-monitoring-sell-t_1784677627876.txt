@@ -1,0 +1,49 @@
+New feature: competitor stock-movement monitoring (sell-through inference), starting with Ingram Micro. Admin-only experimental section. Staged — STOP and report after Stage 1 before building anything.
+
+STAGE 1 — DATA VALIDATION (read-only, run against PRODUCTION)
+
+1. Ingram SOO coverage:
+   SELECT COUNT(*) AS rows, COUNT(soo) AS soo_populated,
+          COUNT(*) FILTER (WHERE soo > 0) AS soo_nonzero,
+          COUNT(DISTINCT snapshot_date) AS dates
+   FROM stock_snapshots ss
+   JOIN distributors d ON d.id = ss.distributor_id
+   WHERE d.name ILIKE '%ingram%';
+2. Cadence: list Ingram's distinct snapshot_dates in order, flag gaps > 1 day.
+3. Signal sample: for the 15 Ingram products with the largest total SOH change over the last 14 days, show the day-by-day SOH and SOO series.
+4. Same coverage/cadence summary for all other distributors (one row each) so we know who's eligible later.
+
+Report all four. STOP. Do not build if soo_nonzero is ~0 or there are fewer than 10 snapshot dates — report and wait for direction instead.
+
+STAGE 2 — MOVEMENT API (after Stage 1 approval)
+
+New endpoint GET /api/experimental/movement (admin-only via requireAdmin):
+Query params: distributorId (required), days (default 14), brand (optional), search (optional), limit/offset.
+
+Logic — distributor-generic, not Ingram-hardcoded:
+For each product with snapshots for that distributor in the window, order snapshots by snapshot_date and compute per-interval deltas:
+  soh_delta = soh - prev_soh; soo_delta = soo - prev_soo; interval_days = date - prev_date
+Classify each interval:
+  - soh_delta < 0 → outgoing (sell-through estimate = -soh_delta)
+  - soh_delta > 0 AND soo_delta < 0 → delivery; masked sales estimate = max(0, -soo_delta - soh_delta)
+  - soh_delta > 0 AND soo_delta >= 0 → restock (unexplained inbound)
+  - soo_delta > 0 → reorder event (flag separately, doesn't affect sell-through)
+Aggregate per product: est_units_out (sum of outgoing + masked sales), units_in, current_soh, current_soo, reorder_flag (any reorder event in window), velocity_per_day (est_units_out / days with coverage), days_of_cover (current_soh / velocity, null if velocity 0).
+Response includes per-product daily series (date, soh, soo) for sparklines, plus a data_quality field per product: number of intervals, largest gap in days.
+All estimates are floors, not exact sales — name fields est_* accordingly. Add the endpoint to openapi.yaml and regenerate hooks (Orval) per repo convention.
+
+STAGE 3 — EXPERIMENTAL SECTION (frontend)
+
+1. Nav: add "Experimental" section, rendered ONLY when the logged-in user's role is admin (hide nav item AND guard the route; the API is already admin-gated server-side).
+2. Page: /experimental/movement — distributor selector (default Ingram Micro), window selector (7/14/30 days), brand filter and search consistent with the comparison grid.
+3. Table columns: VPN, brand, description, current SOH, current SOO, est units out, velocity/day, days of cover, reorder flag, SOH+SOO sparkline. Default sort: est units out DESC. Highlight rows where soh_delta < 0 AND soo_delta > 0 in the window (selling fast + reordering).
+4. Prominent banner: "Experimental — movement is estimated from stock-position changes, not actual sales data. Figures are minimums."
+5. Empty/thin-data states: if a product has fewer than 3 snapshots in the window, show a dash with a tooltip, not a number.
+
+STAGE 4 — TESTS & VERIFY
+
+1. Unit tests for the interval classifier: pure sell-through, delivery with masked sales, restock, reorder, multi-day gap normalisation.
+2. e2e: non-admin gets 403 on /api/experimental/movement and no Experimental nav; admin sees both.
+3. Verify in PRODUCTION with a real Ingram SKU: pick one with clear SOH decline, confirm est_units_out matches the raw series by hand.
+
+Conventions: follow openapi.yaml-first flow, Drizzle for queries, no schema changes in this phase. Keep all experimental routes under /api/experimental/ and pages under /experimental/ so promotion or removal later is one move.
