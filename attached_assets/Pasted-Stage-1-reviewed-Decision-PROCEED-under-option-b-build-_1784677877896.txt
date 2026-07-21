@@ -1,0 +1,21 @@
+Stage 1 reviewed. Decision: PROCEED under option (b) — build now with caveated UI. Cadence will improve as upload frequency increases; the feature must work correctly at weekly resolution today. Three changes to the plan, in this order:
+
+STAGE 1.5 — WITHIN-FILE DUPLICATE FIX (before any movement work)
+1. Diagnose: for Ingram's raw files, confirm whether the same part number appears on multiple rows within one file (likely per-warehouse lines). Report an example.
+2. Fix commitRowsBatched: when a file yields multiple rows for the same normalized VPN, aggregate before insert — SUM soh, SUM soo, take MAX sell_price... actually report first: show sell_price variance across duplicate rows in the raw file, then propose the price rule (if prices identical, take it; if they differ, take MIN as the comparison-relevant price and flag). Do not guess silently.
+3. One-off cleanup in PRODUCTION: find all (product_id, distributor_id, snapshot_date) groups with >1 row, aggregate them the same way (single transaction, report counts).
+4. e2e test: file with the same SKU on two rows commits as ONE snapshot row with summed SOH/SOO.
+
+STAGE 2 — MOVEMENT API, amended from prior spec:
+- Replace velocity_per_day with per-interval movement: est_units_out per interval and total for window. days_of_cover = current_soh / (total est_units_out / window days), null if no outflow; label est_.
+- Classifier must run in two modes: soo-aware (Ingram) and soh-only (all others, where soo is null/zero) — mode chosen per distributor automatically, reported in the response as inference_mode.
+- data_quality per product: snapshot count, max gap days. Products with <3 snapshots in window return nulls.
+
+STAGE 3 — FRONTEND, amended:
+- Banner: "Experimental — estimates derived from weekly stock positions, not sales data. Figures are minimums. Accuracy improves with upload frequency."
+- Columns: current SOH, current SOO, est units out (window), days of cover, reorder flag, sparkline. No per-day velocity column.
+- Keep the hot-SKU highlight (SOH falling + SOO rising).
+
+STAGE 4 — unchanged (unit tests for classifier incl. soh-only mode, admin 403 e2e, manual verify vs 13B9005EAU's series).
+
+All admin-gated under /api/experimental/ and /experimental/ as before. Report after Stage 1.5 diagnosis before touching commit code.
