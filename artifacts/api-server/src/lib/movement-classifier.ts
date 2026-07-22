@@ -4,33 +4,26 @@ export interface SnapshotPoint {
 }
 
 export interface ClassifierResult {
-  estUnitsOut: number;
-  unitsIn: number;
-  reorderFlag: boolean;
+  estUnitsSold: number;
 }
 
 /**
- * Walk all consecutive snapshot pairs and classify each interval.
+ * Competitor market intelligence: estimate units sold by a competing distributor
+ * over a window so Dicker PMs can gauge whether to range the stock.
  *
- * soh_d = curr.soh - prev.soh
- * soo_d = (curr.soo ?? 0) - (prev.soo ?? 0)
+ * Walk all consecutive snapshot pairs and accumulate estimated units sold:
+ *   soh_d = curr.soh - prev.soh
+ *   soo_d = (curr.soo ?? 0) - (prev.soo ?? 0)
  *
- *   soh_d < 0                    → outgoing:  estUnitsOut += -soh_d
- *   soh_d > 0 AND soo_d < 0     → delivery with masked sales:
- *                                    estUnitsOut += max(0, -soo_d - soh_d)
- *                                    unitsIn     += soh_d
- *   soh_d > 0 AND soo_d >= 0    → restock: unitsIn += soh_d
- *   soo_d > 0 (independent)     → reorderFlag = true
+ *   soh_d < 0                        → pure SOH decline: +(-soh_d)
+ *   soh_d > 0 AND soo_d < 0         → delivery with masked sales:
+ *                                        +max(0, -soo_d - soh_d)
  *
- * In soh_only mode (soo always null/0) this degrades to a pure SOH-decline
- * floor — estUnitsOut is a lower bound on actual sales.
- *
- * Pairs where either soh value is null are skipped.
+ * Pairs where either soh is null are skipped.
+ * Result is a lower-bound (estimates are minimums).
  */
 export function classifyMovement(snapshots: SnapshotPoint[]): ClassifierResult {
-  let estUnitsOut = 0;
-  let unitsIn = 0;
-  let reorderFlag = false;
+  let estUnitsSold = 0;
 
   for (let i = 1; i < snapshots.length; i++) {
     const prev = snapshots[i - 1]!;
@@ -40,25 +33,15 @@ export function classifyMovement(snapshots: SnapshotPoint[]): ClassifierResult {
     const currSoh = curr.soh;
     if (prevSoh == null || currSoh == null) continue;
 
-    const prevSoo = prev.soo ?? 0;
-    const currSoo = curr.soo ?? 0;
-
     const soh_d = currSoh - prevSoh;
-    const soo_d = currSoo - prevSoo;
+    const soo_d = (curr.soo ?? 0) - (prev.soo ?? 0);
 
     if (soh_d < 0) {
-      estUnitsOut += -soh_d;
+      estUnitsSold += -soh_d;
     } else if (soh_d > 0 && soo_d < 0) {
-      estUnitsOut += Math.max(0, -soo_d - soh_d);
-      unitsIn += soh_d;
-    } else if (soh_d > 0 && soo_d >= 0) {
-      unitsIn += soh_d;
-    }
-
-    if (soo_d > 0) {
-      reorderFlag = true;
+      estUnitsSold += Math.max(0, -soo_d - soh_d);
     }
   }
 
-  return { estUnitsOut, unitsIn, reorderFlag };
+  return { estUnitsSold };
 }

@@ -337,38 +337,41 @@ export interface PriceSpreadFlag {
   maxPrice: number;
 }
 
+/**
+ * Dicker Data stock posture for this product
+ */
+export type MovementProductDickerStatus = typeof MovementProductDickerStatus[keyof typeof MovementProductDickerStatus];
+
+
+export const MovementProductDickerStatus = {
+  stocked: 'stocked',
+  listed: 'listed',
+  not_carried: 'not carried',
+} as const;
+
 export interface MovementProduct {
   productId: number;
   vpnNormalized: string;
   vpnDisplay: string;
   brand: string;
   description: string;
+  /** In-window snapshots ASC — used to render sparkline */
   snapshots: MovementSnapshot[];
   /** @nullable */
   latestSoh?: number | null;
   /** @nullable */
-  latestSoo?: number | null;
-  /** @nullable */
   latestSellPrice?: number | null;
-  /** Estimated units sold/consumed over the window (classifier total) */
-  estUnitsOut: number;
-  /** Units received (deliveries + restocks) over the window */
-  unitsIn: number;
-  /** True if any SOO increase was observed in the window */
-  reorderFlag: boolean;
+  /** Lower-bound estimate of units sold by this competitor over the window */
+  estUnitsSold: number;
   /**
-     * latestSoh / (estUnitsOut / windowDays); null when estUnitsOut = 0
+     * estUnitsSold * latestSellPrice; null when price unknown
      * @nullable
      */
-  daysOfCover?: number | null;
-  /**
-     * Earliest in-window snapshot date for this product
-     * @nullable
-     */
-  movementSinceDate?: string | null;
-  /** True only if the first-ever snapshot for this distributor is within the window */
-  isNew: boolean;
-  priceSpreadFlag?: PriceSpreadFlag | null;
+  estRevenue?: number | null;
+  /** latestSoh == 0 AND estUnitsSold > 0 */
+  soldOut: boolean;
+  /** Dicker Data stock posture for this product */
+  dickerStatus: MovementProductDickerStatus;
 }
 
 export type MovementDataQualityDateRange = {
@@ -434,6 +437,14 @@ search?: string;
 limit?: number;
 offset?: number;
 /**
+ * If true, only return products where latest SOH = 0 and estUnitsSold > 0
+ */
+soldOutOnly?: boolean;
+/**
+ * If true, only return products with no Dicker Data snapshot
+ */
+notCarriedByDicker?: boolean;
+/**
  * When true (default), exclude products with no SOH or SOO in any snapshot within the window
  */
 activeOnly?: boolean;
@@ -455,11 +466,9 @@ export const GetMovementSortBy = {
   brand: 'brand',
   desc: 'desc',
   soh: 'soh',
-  soo: 'soo',
   price: 'price',
-  estUnitsOut: 'estUnitsOut',
-  unitsIn: 'unitsIn',
-  daysOfCover: 'daysOfCover',
+  estUnitsSold: 'estUnitsSold',
+  estRevenue: 'estRevenue',
 } as const;
 
 export type GetMovementSortDir = typeof GetMovementSortDir[keyof typeof GetMovementSortDir];

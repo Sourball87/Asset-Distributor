@@ -564,8 +564,10 @@ export const CleanupDuplicatesResponse = zod.object({
 export const getMovementQueryDaysDefault = 14;
 export const getMovementQueryLimitDefault = 100;
 export const getMovementQueryOffsetDefault = 0;
+export const getMovementQuerySoldOutOnlyDefault = false;
+export const getMovementQueryNotCarriedByDickerDefault = false;
 export const getMovementQueryActiveOnlyDefault = true;
-export const getMovementQuerySortByDefault = `estUnitsOut`;
+export const getMovementQuerySortByDefault = `estRevenue`;
 export const getMovementQuerySortDirDefault = `desc`;
 
 export const GetMovementQueryParams = zod.object({
@@ -575,8 +577,10 @@ export const GetMovementQueryParams = zod.object({
   "search": zod.coerce.string().optional(),
   "limit": zod.coerce.number().default(getMovementQueryLimitDefault),
   "offset": zod.coerce.number().default(getMovementQueryOffsetDefault),
+  "soldOutOnly": zod.coerce.boolean().default(getMovementQuerySoldOutOnlyDefault).describe('If true, only return products where latest SOH = 0 and estUnitsSold > 0'),
+  "notCarriedByDicker": zod.coerce.boolean().default(getMovementQueryNotCarriedByDickerDefault).describe('If true, only return products with no Dicker Data snapshot'),
   "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH or SOO in any snapshot within the window'),
-  "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'soo', 'price', 'estUnitsOut', 'unitsIn', 'daysOfCover']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
+  "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'price', 'estUnitsSold', 'estRevenue']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
   "sortDir": zod.enum(['asc', 'desc']).default(getMovementQuerySortDirDefault).describe('Sort direction')
 })
 
@@ -602,20 +606,13 @@ export const GetMovementResponse = zod.object({
   "soh": zod.number().nullish(),
   "soo": zod.number().nullish(),
   "sellPrice": zod.number().nullish()
-})),
+})).describe('In-window snapshots ASC — used to render sparkline'),
   "latestSoh": zod.number().nullish(),
-  "latestSoo": zod.number().nullish(),
   "latestSellPrice": zod.number().nullish(),
-  "estUnitsOut": zod.number().describe('Estimated units sold\/consumed over the window (classifier total)'),
-  "unitsIn": zod.number().describe('Units received (deliveries + restocks) over the window'),
-  "reorderFlag": zod.boolean().describe('True if any SOO increase was observed in the window'),
-  "daysOfCover": zod.number().nullish().describe('latestSoh \/ (estUnitsOut \/ windowDays); null when estUnitsOut = 0'),
-  "movementSinceDate": zod.string().nullish().describe('Earliest in-window snapshot date for this product'),
-  "isNew": zod.boolean().describe('True only if the first-ever snapshot for this distributor is within the window'),
-  "priceSpreadFlag": zod.union([zod.object({
-  "minPrice": zod.number(),
-  "maxPrice": zod.number()
-}),zod.null()]).optional()
+  "estUnitsSold": zod.number().describe('Lower-bound estimate of units sold by this competitor over the window'),
+  "estRevenue": zod.number().nullish().describe('estUnitsSold \* latestSellPrice; null when price unknown'),
+  "soldOut": zod.boolean().describe('latestSoh == 0 AND estUnitsSold > 0'),
+  "dickerStatus": zod.enum(['stocked', 'listed', 'not carried']).describe('Dicker Data stock posture for this product')
 })),
   "total": zod.number(),
   "limit": zod.number(),

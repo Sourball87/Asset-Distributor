@@ -16,6 +16,14 @@ search?: string;
 limit?: number;
 offset?: number;
 /**
+ * If true, only return products where latest SOH = 0 and estUnitsSold > 0
+ */
+soldOutOnly?: boolean;
+/**
+ * If true, only return products with no Dicker Data snapshot
+ */
+notCarriedByDicker?: boolean;
+/**
  * When true (default), exclude products with no SOH or SOO in any snapshot within the window
  */
 activeOnly?: boolean;

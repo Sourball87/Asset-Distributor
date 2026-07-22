@@ -144,11 +144,13 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
   const search     = req.query.search ? String(req.query.search).trim() : null;
   const activeOnly = req.query.activeOnly !== "false";
 
-  const validSortBy  = ["vpn", "brand", "desc", "soh", "soo", "price", "estUnitsOut", "unitsIn", "daysOfCover"] as const;
+  const validSortBy  = ["vpn", "brand", "desc", "soh", "price", "estUnitsSold", "estRevenue"] as const;
   type SortByCol = typeof validSortBy[number];
-  const sortByRaw    = String(req.query.sortBy ?? "estUnitsOut");
-  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "estUnitsOut";
+  const sortByRaw    = String(req.query.sortBy ?? "estRevenue");
+  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "estRevenue";
   const sortDir      = req.query.sortDir === "asc" ? "asc" : "desc";
+  const soldOutOnly        = req.query.soldOutOnly        === "true";
+  const notCarriedByDicker = req.query.notCarriedByDicker === "true";
 
   try {
     // Resolve distributor name
@@ -161,6 +163,13 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       res.status(404).json({ error: "Distributor not found" });
       return;
     }
+
+    // Baseline distributor (Dicker Data) — for dickerStatus and notCarriedByDicker filter
+    const [baseline] = await db
+      .select({ id: distributorsTable.id })
+      .from(distributorsTable)
+      .where(eq(distributorsTable.isBaseline, true));
+    const baselineDistId = baseline?.id ?? null;
 
     // Cutoff date (days look-back from today)
     const cutoff = new Date();
@@ -218,35 +227,74 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         )`
       : sql``;
 
-    // Distinct product IDs that have snapshots in window (for total count)
+    // SQL fragment for est_units_sold — mirrors classifyMovement() exactly
+    const estUnitsSoldExpr = sql.raw(`COALESCE(SUM(
+      CASE
+        WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
+        WHEN soh - prev_soh > 0
+          AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
+          THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
+        ELSE 0
+      END
+    ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)`);
+
+    // soldOutOnly / notCarriedByDicker post-aggregation filters
+    const soldOutHaving = soldOutOnly
+      ? sql.raw(`AND MAX(soh) FILTER (WHERE rn = 1) = 0 AND ${estUnitsSoldExpr.queryChunks.join("")} > 0`)
+      : sql``;
+    const notCarriedFilter =
+      notCarriedByDicker && baselineDistId != null
+        ? sql`AND product_id NOT IN (
+            SELECT DISTINCT product_id FROM stock_snapshots
+            WHERE distributor_id = ${baselineDistId}
+          )`
+        : sql``;
+
+    // Count query — uses same CTE + filter stack for accurate pagination totals
     const countRows = await db.execute<{ total: string }>(sql`
-      SELECT COUNT(DISTINCT ss.product_id) AS total
-      FROM stock_snapshots ss
-      JOIN products p ON p.id = ss.product_id
-      WHERE ss.distributor_id = ${distId}
-        AND ss.snapshot_date >= ${cutoffStr}::date
-        ${activeFilter}
-        ${brand  ? sql`AND p.brand = ${brand}` : sql``}
-        ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
+      WITH ordered AS (
+        SELECT
+          ss.product_id,
+          ss.soh,
+          ss.soo,
+          LAG(ss.soh) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soh,
+          LAG(ss.soo) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soo,
+          ROW_NUMBER() OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date DESC) AS rn
+        FROM stock_snapshots ss
+        JOIN products p ON p.id = ss.product_id
+        WHERE ss.distributor_id = ${distId}
+          AND ss.snapshot_date >= ${cutoffStr}::date
+          ${activeFilter}
+          ${brand  ? sql`AND p.brand = ${brand}` : sql``}
+          ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
+      ),
+      agg AS (
+        SELECT
+          product_id,
+          MAX(soh) FILTER (WHERE rn = 1) AS latest_soh,
+          ${estUnitsSoldExpr} AS est_units_sold
+        FROM ordered
+        GROUP BY product_id
+        HAVING 1=1 ${soldOutHaving}
+      )
+      SELECT COUNT(*) AS total FROM agg WHERE 1=1 ${notCarriedFilter}
     `);
     const total = parseInt(String(countRows.rows[0]?.total ?? "0"), 10);
 
     // Build sort expression using sql.raw() so column/direction aren't parameterized
     const sortColName =
       sortBy === "soh"          ? "agg.latest_soh"
-      : sortBy === "soo"        ? "agg.latest_soo"
       : sortBy === "price"      ? "agg.latest_price"
-      : sortBy === "estUnitsOut" ? "agg.est_units_out"
-      : sortBy === "unitsIn"    ? "agg.units_in"
-      : sortBy === "daysOfCover" ? "agg.days_of_cover"
+      : sortBy === "estUnitsSold" ? "agg.est_units_sold"
+      : sortBy === "estRevenue"   ? "agg.est_revenue"
       : sortBy === "vpn"        ? "p.vpn_normalized"
       : sortBy === "brand"      ? "p.brand"
       :                           "p.description";
     const orderByClause = sql.raw(`${sortColName} ${sortDir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
 
-    // Paginated product list — CTE walks all consecutive snapshot pairs to compute
-    // classifier metrics (estUnitsOut, unitsIn, reorderFlag, daysOfCover) then
-    // sorts before pagination so page 1 always returns the correct top-N rows.
+    // Paginated product list — CTE computes estUnitsSold + estRevenue, applies
+    // soldOutOnly/notCarriedByDicker filters, sorts, then paginates.
+    // FIX 1: sort order is preserved; client iterates productIds[] in CTE order.
     const productIdRows = await db.execute<{ product_id: string }>(sql`
       WITH ordered AS (
         SELECT
@@ -254,7 +302,6 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           ss.soh,
           ss.soo,
           ss.sell_price,
-          ss.snapshot_date,
           LAG(ss.soh) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soh,
           LAG(ss.soo) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soo,
           ROW_NUMBER() OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date DESC) AS rn
@@ -270,52 +317,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         SELECT
           product_id,
           MAX(soh)        FILTER (WHERE rn = 1) AS latest_soh,
-          MAX(soo)        FILTER (WHERE rn = 1) AS latest_soo,
           MAX(sell_price) FILTER (WHERE rn = 1) AS latest_price,
-          COALESCE(SUM(
-            CASE
-              WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
-              WHEN soh - prev_soh > 0
-                AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
-                THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
-              ELSE 0
-            END
-          ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) AS est_units_out,
-          COALESCE(SUM(
-            CASE WHEN soh - prev_soh > 0 THEN soh - prev_soh ELSE 0 END
-          ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) AS units_in,
-          BOOL_OR(
-            (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) > 0
-          ) FILTER (WHERE prev_soh IS NOT NULL) AS reorder_flag,
-          CASE
-            WHEN COALESCE(SUM(
-              CASE
-                WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
-                WHEN soh - prev_soh > 0
-                  AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
-                  THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
-                ELSE 0
-              END
-            ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) > 0
-            THEN (MAX(soh) FILTER (WHERE rn = 1))::float
-                 / (COALESCE(SUM(
-                      CASE
-                        WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
-                        WHEN soh - prev_soh > 0
-                          AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
-                          THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
-                        ELSE 0
-                      END
-                    ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)::float
-                    / ${sql.raw(String(days))})
-            ELSE NULL
-          END AS days_of_cover
+          ${estUnitsSoldExpr}                    AS est_units_sold,
+          ${estUnitsSoldExpr} * MAX(sell_price) FILTER (WHERE rn = 1) AS est_revenue
         FROM ordered
         GROUP BY product_id
+        HAVING 1=1 ${soldOutHaving}
       )
       SELECT agg.product_id
       FROM agg
       JOIN products p ON p.id = agg.product_id
+      WHERE 1=1 ${notCarriedFilter}
       ORDER BY ${orderByClause}
       LIMIT ${limit} OFFSET ${offset}
     `);
@@ -369,17 +381,20 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       ORDER BY ss.product_id, ss.snapshot_date ASC
     `);
 
-    // First-ever snapshot date per product (across ALL dates, not just window)
-    // Used for the correct isNew definition.
-    const firstDateRows = await db.execute<{ product_id: string; first_date: string }>(sql`
-      SELECT product_id, MIN(snapshot_date) AS first_date
-      FROM stock_snapshots
-      WHERE distributor_id = ${distId}
-        AND product_id = ANY(${sql`ARRAY[${sql.join(productIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})
-      GROUP BY product_id
-    `);
-    const firstDates = new Map(
-      firstDateRows.rows.map((r) => [parseInt(String(r.product_id), 10), r.first_date]),
+    // Dicker Data latest SOH per product in this page (for dickerStatus)
+    type DickerRow = { product_id: string; latest_soh: string | null };
+    const dickerRows = baselineDistId != null
+      ? await db.execute<DickerRow>(sql`
+          SELECT DISTINCT ON (product_id)
+            product_id, soh AS latest_soh
+          FROM stock_snapshots
+          WHERE distributor_id = ${baselineDistId}
+            AND product_id = ANY(${sql`ARRAY[${sql.join(productIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})
+          ORDER BY product_id, snapshot_date DESC
+        `)
+      : { rows: [] as DickerRow[] };
+    const dickerByProduct = new Map(
+      dickerRows.rows.map((r) => [parseInt(String(r.product_id), 10), r.latest_soh]),
     );
 
     // Group snapshots by product
@@ -397,67 +412,56 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const products = productIds
       .filter((pid) => byProduct.has(pid))
       .map((pid) => {
-        const snaps = byProduct.get(pid)!;
-        const sorted  = snaps; // already ASC from DB
-        const latest  = sorted[sorted.length - 1]!;
+        const snaps  = byProduct.get(pid)!;
+        const sorted = snaps; // already ASC from DB
+        const latest = sorted[sorted.length - 1]!;
 
-        const latestSoh  = latest.soh  != null ? parseInt(String(latest.soh),  10) : null;
-        const latestSoo  = latest.soo  != null ? parseInt(String(latest.soo),  10) : null;
-        const latestSell = latest.sell_price != null ? parseFloat(latest.sell_price) : null;
+        const latestSoh  = latest.soh       != null ? parseInt(String(latest.soh),      10) : null;
+        const latestSell = latest.sell_price != null ? parseFloat(latest.sell_price)        : null;
 
-        // Earliest in-window snapshot date (for movementSinceDate)
-        const movementSinceDate = sorted[0]?.snapshot_date ?? null;
+        // Classifier: see movement-classifier.ts — estimates units sold by competitor
+        const { estUnitsSold } = classifyMovement(
+          sorted.map((s) => ({
+            soh: s.soh != null ? parseInt(String(s.soh), 10) : null,
+            soo: s.soo != null ? parseInt(String(s.soo), 10) : null,
+          })),
+        );
 
-        // isNew: true only if the first-ever snapshot for this distributor
-        // falls inside the current look-back window.
-        const firstDate = firstDates.get(pid) ?? cutoffStr;
-        const isNew = firstDate >= cutoffStr;
+        const estRevenue = estUnitsSold > 0 && latestSell != null
+          ? estUnitsSold * latestSell
+          : null;
 
-        // FIX 3: walk all consecutive pairs with the full classifier
-        const classifierInput = sorted.map((s) => ({
-          soh: s.soh != null ? parseInt(String(s.soh), 10) : null,
-          soo: s.soo != null ? parseInt(String(s.soo), 10) : null,
-        }));
-        const { estUnitsOut, unitsIn, reorderFlag } = classifyMovement(classifierInput);
+        const soldOut = latestSoh === 0 && estUnitsSold > 0;
 
-        const daysOfCover =
-          estUnitsOut > 0 && latestSoh != null
-            ? latestSoh / (estUnitsOut / days)
-            : null;
-
-        // Price spread flag: from the latest snapshot's persisted sell_price_max
-        const priceSpreadFlag =
-          latest.sell_price_max != null && latest.sell_price != null
-            ? {
-                minPrice: parseFloat(latest.sell_price),
-                maxPrice: parseFloat(latest.sell_price_max),
-              }
-            : null;
+        // Dicker status: did Dicker have stock on the latest snapshot?
+        const dickerLatestSoh = dickerByProduct.get(pid);
+        const dickerStatus: "stocked" | "listed" | "not carried" =
+          dickerLatestSoh === undefined
+            ? "not carried"
+            : dickerLatestSoh != null && parseInt(String(dickerLatestSoh), 10) > 0
+            ? "stocked"
+            : "listed";
 
         return {
-          productId:        pid,
-          vpnNormalized:    latest.vpn_normalized,
-          vpnDisplay:       latest.vpn_display,
-          brand:            latest.brand,
-          description:      latest.description,
-          snapshots:        sorted.map((s) => ({
+          productId:       pid,
+          vpnNormalized:   latest.vpn_normalized,
+          vpnDisplay:      latest.vpn_display,
+          brand:           latest.brand,
+          description:     latest.description,
+          snapshots:       sorted.map((s) => ({
             snapshotDate: s.snapshot_date,
-            soh:          s.soh  != null ? parseInt(String(s.soh),  10) : null,
-            soo:          s.soo  != null ? parseInt(String(s.soo),  10) : null,
-            sellPrice:    s.sell_price != null ? parseFloat(s.sell_price) : null,
+            soh:          s.soh       != null ? parseInt(String(s.soh),  10) : null,
+            soo:          s.soo       != null ? parseInt(String(s.soo),  10) : null,
+            sellPrice:    s.sell_price != null ? parseFloat(s.sell_price)    : null,
           })),
           latestSoh,
-          latestSoo,
           latestSellPrice: latestSell,
-          estUnitsOut,
-          unitsIn,
-          reorderFlag,
-          daysOfCover,
-          movementSinceDate,
-          isNew,
-          priceSpreadFlag,
-      };
-    });
+          estUnitsSold,
+          estRevenue,
+          soldOut,
+          dickerStatus,
+        };
+      });
 
     res.json({
       distributorId:   distId,

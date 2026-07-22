@@ -44,6 +44,7 @@ export * from './loginInput';
 export * from './movementDataQuality';
 export * from './movementDataQualityDateRange';
 export * from './movementProduct';
+export * from './movementProductDickerStatus';
 export * from './movementResult';
 export * from './movementResultInferenceMode';
 export * from './movementSnapshot';

@@ -733,6 +733,20 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: soldOutOnly
+          in: query
+          required: false
+          description: If true, only return products where latest SOH = 0 and estUnitsSold > 0
+          schema:
+            type: boolean
+            default: false
+        - name: notCarriedByDicker
+          in: query
+          required: false
+          description: If true, only return products with no Dicker Data snapshot
+          schema:
+            type: boolean
+            default: false
         - name: activeOnly
           in: query
           required: false
@@ -746,8 +760,8 @@ paths:
           description: Column to sort by (server-side, applied before pagination)
           schema:
             type: string
-            enum: [vpn, brand, desc, soh, soo, price, estUnitsOut, unitsIn, daysOfCover]
-            default: estUnitsOut
+            enum: [vpn, brand, desc, soh, price, estUnitsSold, estRevenue]
+            default: estRevenue
         - name: sortDir
           in: query
           required: false
@@ -1257,7 +1271,7 @@ components:
 
     MovementProduct:
       type: object
-      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, isNew, estUnitsOut, unitsIn, reorderFlag]
+      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, estUnitsSold, soldOut, dickerStatus]
       properties:
         productId:
           type: integer
@@ -1273,34 +1287,24 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MovementSnapshot"
+          description: In-window snapshots ASC — used to render sparkline
         latestSoh:
-          type: ["integer", "null"]
-        latestSoo:
           type: ["integer", "null"]
         latestSellPrice:
           type: ["number", "null"]
-        estUnitsOut:
+        estUnitsSold:
           type: integer
-          description: Estimated units sold/consumed over the window (classifier total)
-        unitsIn:
-          type: integer
-          description: Units received (deliveries + restocks) over the window
-        reorderFlag:
-          type: boolean
-          description: True if any SOO increase was observed in the window
-        daysOfCover:
+          description: Lower-bound estimate of units sold by this competitor over the window
+        estRevenue:
           type: ["number", "null"]
-          description: latestSoh / (estUnitsOut / windowDays); null when estUnitsOut = 0
-        movementSinceDate:
-          type: ["string", "null"]
-          description: Earliest in-window snapshot date for this product
-        isNew:
+          description: estUnitsSold * latestSellPrice; null when price unknown
+        soldOut:
           type: boolean
-          description: True only if the first-ever snapshot for this distributor is within the window
-        priceSpreadFlag:
-          oneOf:
-            - $ref: "#/components/schemas/PriceSpreadFlag"
-            - type: "null"
+          description: latestSoh == 0 AND estUnitsSold > 0
+        dickerStatus:
+          type: string
+          enum: [stocked, listed, not carried]
+          description: Dicker Data stock posture for this product
 
     MovementDataQuality:
       type: object
