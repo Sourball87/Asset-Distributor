@@ -46,8 +46,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/comparison", label: "Competition Check", icon: Grid },
     { href: "/insights", label: "Insights", icon: TrendingUp },
     ...(!isUser ? [{ href: "/import", label: "Import", icon: Upload }] : []),
-    ...(isAdmin ? [{ href: "/movement", label: "Movement", icon: Activity }] : []),
   ];
+
+  const experimentalItems = isAdmin
+    ? [{ href: "/movement", label: "Movement", icon: Activity }]
+    : [];
 
   const settingsItems = [
     ...(!isUser ? [{ href: "/settings/distributors", label: "Distributors", icon: Building2 }] : []),
@@ -94,6 +97,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
+
+          {experimentalItems.length > 0 && (
+            <>
+              <Separator className="my-4" />
+              <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Experimental
+              </div>
+              <nav className="space-y-0.5 px-2">
+                {experimentalItems.map((item) => (
+                  <Link key={item.href} href={item.href} className={`flex items-center gap-2 px-2 py-1.5 rounded-sm transition-colors ${location === item.href ? 'bg-secondary text-secondary-foreground font-medium' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}`}>
+                    <item.icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                ))}
+              </nav>
+            </>
+          )}
         </div>
       </div>
 
