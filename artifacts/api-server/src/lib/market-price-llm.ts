@@ -7,7 +7,7 @@
  * Design:
  * - Single Anthropic client, created lazily so the server still boots without
  *   the key (the route guard will 503 before the client is used).
- * - 15-second AbortController timeout on every call.
+ * - 60-second AbortController timeout on every call.
  * - Strip ``` fences from the returned JSON.
  * - Daily cap (DAILY_LLM_CAP) enforced in DB; callers receive a 429-tagged
  *   error when the cap is exceeded.
@@ -24,7 +24,7 @@ import { eq, sql } from "drizzle-orm";
 
 export const LLM_MODEL = "claude-sonnet-4-6";
 export const DAILY_LLM_CAP = 100;
-const LLM_TIMEOUT_MS = 15_000;
+const LLM_TIMEOUT_MS = 60_000;
 
 // ── Anthropic client (lazy) ────────────────────────────────────────────────
 
@@ -206,7 +206,7 @@ export async function callLlmJudge(
     rawText = block.type === "text" ? block.text : "";
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new LlmUnavailableError("Matching service timed out after 15s");
+      throw new LlmUnavailableError("Matching service timed out after 60s");
     }
     throw new LlmUnavailableError(
       `Anthropic API error: ${err instanceof Error ? err.message : String(err)}`,
