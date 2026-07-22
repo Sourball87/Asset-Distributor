@@ -12,6 +12,7 @@ export const stockSnapshotsTable = pgTable("stock_snapshots", {
   productId: integer("product_id").notNull().references(() => productsTable.id),
   snapshotDate: date("snapshot_date", { mode: "string" }).notNull(),
   sellPrice: numeric("sell_price", { precision: 12, scale: 2 }),
+  sellPriceMax: numeric("sell_price_max", { precision: 12, scale: 2 }),
   soh: integer("soh"),
   soo: integer("soo"),
   category: text("category"),

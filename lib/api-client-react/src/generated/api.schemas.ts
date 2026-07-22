@@ -311,6 +311,84 @@ export interface DashboardSummary {
   totalNetMovement: number;
 }
 
+export type CleanupResultRemainingDuplicateGroups = {
+  exactIdentical: number;
+  differing: number;
+};
+
+export interface CleanupResult {
+  ok: boolean;
+  rowsDeleted: number;
+  remainingDuplicateGroups: CleanupResultRemainingDuplicateGroups;
+}
+
+export interface MovementSnapshot {
+  snapshotDate: string;
+  /** @nullable */
+  soh?: number | null;
+  /** @nullable */
+  soo?: number | null;
+  /** @nullable */
+  sellPrice?: number | null;
+}
+
+export interface PriceSpreadFlag {
+  minPrice: number;
+  maxPrice: number;
+}
+
+export interface MovementProduct {
+  productId: number;
+  vpnNormalized: string;
+  vpnDisplay: string;
+  brand: string;
+  description: string;
+  snapshots: MovementSnapshot[];
+  /** @nullable */
+  latestSoh?: number | null;
+  /** @nullable */
+  latestSoo?: number | null;
+  /** @nullable */
+  latestSellPrice?: number | null;
+  /** @nullable */
+  movement?: number | null;
+  /** @nullable */
+  movementSinceDate?: string | null;
+  isNew: boolean;
+  priceSpreadFlag?: PriceSpreadFlag | null;
+}
+
+export type MovementDataQualityDateRange = {
+  /** @nullable */
+  from: string | null;
+  /** @nullable */
+  to: string | null;
+};
+
+export interface MovementDataQuality {
+  snapshotCount: number;
+  dateRange: MovementDataQualityDateRange;
+}
+
+export type MovementResultInferenceMode = typeof MovementResultInferenceMode[keyof typeof MovementResultInferenceMode];
+
+
+export const MovementResultInferenceMode = {
+  soh_only: 'soh_only',
+  soo_aware: 'soo_aware',
+} as const;
+
+export interface MovementResult {
+  distributorId: number;
+  distributorName: string;
+  inferenceMode: MovementResultInferenceMode;
+  dataQuality: MovementDataQuality;
+  products: MovementProduct[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type ForgotPassword200 = {
   message: string;
 };
@@ -333,5 +411,14 @@ distributorId?: number;
 search?: string;
 page?: number;
 pageSize?: number;
+};
+
+export type GetMovementParams = {
+distributorId: number;
+days?: number;
+brand?: string;
+search?: string;
+limit?: number;
+offset?: number;
 };
 

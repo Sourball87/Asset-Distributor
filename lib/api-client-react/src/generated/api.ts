@@ -25,6 +25,7 @@ import type {
   Brand,
   BrandInput,
   BrandUpdate,
+  CleanupResult,
   CommitUploadInput,
   ComparisonResult,
   DashboardSummary,
@@ -35,11 +36,13 @@ import type {
   ForgotPassword200,
   ForgotPasswordInput,
   GetComparisonParams,
+  GetMovementParams,
   HealthStatus,
   ImportProfile,
   ImportProfileInput,
   ListUploadsParams,
   LoginInput,
+  MovementResult,
   ParsePreview,
   ParseUploadInput,
   PasswordResetResult,
@@ -2047,6 +2050,162 @@ export function useGetDashboardSummary<TData = Awaited<ReturnType<typeof getDash
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetDashboardSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCleanupDuplicatesUrl = () => {
+
+
+
+
+  return `/api/experimental/cleanup-duplicates`
+}
+
+/**
+ * Collapses duplicate stock_snapshot rows that were committed before the in-import aggregation fix was deployed. Exact-identical groups are de-duplicated (keep lowest id). Differing groups are aggregated (SUM soh/soo, MIN sell_price, MAX sell_price stored when spread >$1). Idempotent — safe to call multiple times.
+ * @summary One-time cleanup — collapse per-warehouse duplicate snapshot rows
+ */
+export const cleanupDuplicates = async ( options?: RequestInit): Promise<CleanupResult> => {
+
+  return customFetch<CleanupResult>(getCleanupDuplicatesUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCleanupDuplicatesMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cleanupDuplicates>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cleanupDuplicates>>, TError,void, TContext> => {
+
+const mutationKey = ['cleanupDuplicates'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cleanupDuplicates>>, void> = () => {
+
+
+          return  cleanupDuplicates(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CleanupDuplicatesMutationResult = NonNullable<Awaited<ReturnType<typeof cleanupDuplicates>>>
+
+    export type CleanupDuplicatesMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary One-time cleanup — collapse per-warehouse duplicate snapshot rows
+ */
+export const useCleanupDuplicates = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cleanupDuplicates>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cleanupDuplicates>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCleanupDuplicatesMutationOptions(options));
+    }
+
+export const getGetMovementUrl = (params: GetMovementParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/experimental/movement?${stringifiedParams}` : `/api/experimental/movement`
+}
+
+/**
+ * Returns per-product SOH movement over a look-back window. Inference mode is auto-detected (soo_aware when the latest snapshot has any nonzero SOO, otherwise soh_only). Admin-only.
+ * @summary Stock movement analysis for a single distributor
+ */
+export const getMovement = async (params: GetMovementParams, options?: RequestInit): Promise<MovementResult> => {
+
+  return customFetch<MovementResult>(getGetMovementUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMovementQueryKey = (params?: GetMovementParams,) => {
+    return [
+    `/api/experimental/movement`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMovementQueryOptions = <TData = Awaited<ReturnType<typeof getMovement>>, TError = ErrorType<ErrorResponse>>(params: GetMovementParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMovementQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMovement>>> = ({ signal }) => getMovement(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMovement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getMovement>>>
+export type GetMovementQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Stock movement analysis for a single distributor
+ */
+
+export function useGetMovement<TData = Awaited<ReturnType<typeof getMovement>>, TError = ErrorType<ErrorResponse>>(
+ params: GetMovementParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMovementQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

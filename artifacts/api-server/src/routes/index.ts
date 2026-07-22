@@ -10,6 +10,7 @@ import compareFileRouter from "./compare-file";
 import comparisonExportRouter from "./comparison-export";
 import uploadsRouter from "./uploads";
 import insightsRouter from "./insights";
+import experimentalRouter from "./experimental";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(compareFileRouter);
 router.use(comparisonExportRouter);
 router.use(uploadsRouter);
 router.use(insightsRouter);
+router.use(experimentalRouter);
 
 export default router;

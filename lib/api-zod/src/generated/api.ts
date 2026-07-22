@@ -543,3 +543,74 @@ export const GetDashboardSummaryResponse = zod.object({
 })
 
 
+/**
+ * Collapses duplicate stock_snapshot rows that were committed before the in-import aggregation fix was deployed. Exact-identical groups are de-duplicated (keep lowest id). Differing groups are aggregated (SUM soh/soo, MIN sell_price, MAX sell_price stored when spread >$1). Idempotent — safe to call multiple times.
+ * @summary One-time cleanup — collapse per-warehouse duplicate snapshot rows
+ */
+export const CleanupDuplicatesResponse = zod.object({
+  "ok": zod.boolean(),
+  "rowsDeleted": zod.number(),
+  "remainingDuplicateGroups": zod.object({
+  "exactIdentical": zod.number(),
+  "differing": zod.number()
+})
+})
+
+
+/**
+ * Returns per-product SOH movement over a look-back window. Inference mode is auto-detected (soo_aware when the latest snapshot has any nonzero SOO, otherwise soh_only). Admin-only.
+ * @summary Stock movement analysis for a single distributor
+ */
+export const getMovementQueryDaysDefault = 14;
+export const getMovementQueryLimitDefault = 100;
+export const getMovementQueryOffsetDefault = 0;
+
+export const GetMovementQueryParams = zod.object({
+  "distributorId": zod.coerce.number(),
+  "days": zod.coerce.number().default(getMovementQueryDaysDefault),
+  "brand": zod.coerce.string().optional(),
+  "search": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().default(getMovementQueryLimitDefault),
+  "offset": zod.coerce.number().default(getMovementQueryOffsetDefault)
+})
+
+export const GetMovementResponse = zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "inferenceMode": zod.enum(['soh_only', 'soo_aware']),
+  "dataQuality": zod.object({
+  "snapshotCount": zod.number(),
+  "dateRange": zod.object({
+  "from": zod.string().nullable(),
+  "to": zod.string().nullable()
+})
+}),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "vpnNormalized": zod.string(),
+  "vpnDisplay": zod.string(),
+  "brand": zod.string(),
+  "description": zod.string(),
+  "snapshots": zod.array(zod.object({
+  "snapshotDate": zod.string(),
+  "soh": zod.number().nullish(),
+  "soo": zod.number().nullish(),
+  "sellPrice": zod.number().nullish()
+})),
+  "latestSoh": zod.number().nullish(),
+  "latestSoo": zod.number().nullish(),
+  "latestSellPrice": zod.number().nullish(),
+  "movement": zod.number().nullish(),
+  "movementSinceDate": zod.string().nullish(),
+  "isNew": zod.boolean(),
+  "priceSpreadFlag": zod.union([zod.object({
+  "minPrice": zod.number(),
+  "maxPrice": zod.number()
+}),zod.null()]).optional()
+})),
+  "total": zod.number(),
+  "limit": zod.number(),
+  "offset": zod.number()
+})
+
+

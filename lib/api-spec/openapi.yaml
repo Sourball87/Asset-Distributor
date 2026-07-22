@@ -24,6 +24,8 @@ tags:
     description: Price/stock comparison grid
   - name: dashboard
     description: Dashboard summary data
+  - name: experimental
+    description: Experimental / admin-only analytics endpoints
 
 paths:
   /healthz:
@@ -662,6 +664,95 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardSummary"
 
+  # --- Experimental (admin-only) ---
+  /experimental/cleanup-duplicates:
+    post:
+      operationId: cleanupDuplicates
+      tags: [experimental]
+      summary: One-time cleanup — collapse per-warehouse duplicate snapshot rows
+      description: >
+        Collapses duplicate stock_snapshot rows that were committed before the
+        in-import aggregation fix was deployed. Exact-identical groups are
+        de-duplicated (keep lowest id). Differing groups are aggregated
+        (SUM soh/soo, MIN sell_price, MAX sell_price stored when spread >$1).
+        Idempotent — safe to call multiple times.
+      responses:
+        "200":
+          description: Cleanup summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CleanupResult"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /experimental/movement:
+    get:
+      operationId: getMovement
+      tags: [experimental]
+      summary: Stock movement analysis for a single distributor
+      description: >
+        Returns per-product SOH movement over a look-back window.
+        Inference mode is auto-detected (soo_aware when the latest snapshot
+        has any nonzero SOO, otherwise soh_only). Admin-only.
+      parameters:
+        - name: distributorId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 14
+        - name: brand
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Movement result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MovementResult"
+        "400":
+          description: Missing or invalid distributorId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -1099,4 +1190,118 @@ components:
         dickerMostExpensiveCount:
           type: integer
         totalNetMovement:
+          type: integer
+
+    # --- Experimental ---
+    CleanupResult:
+      type: object
+      required: [ok, rowsDeleted, remainingDuplicateGroups]
+      properties:
+        ok:
+          type: boolean
+        rowsDeleted:
+          type: integer
+        remainingDuplicateGroups:
+          type: object
+          required: [exactIdentical, differing]
+          properties:
+            exactIdentical:
+              type: integer
+            differing:
+              type: integer
+
+    MovementSnapshot:
+      type: object
+      required: [snapshotDate]
+      properties:
+        snapshotDate:
+          type: string
+        soh:
+          type: ["integer", "null"]
+        soo:
+          type: ["integer", "null"]
+        sellPrice:
+          type: ["number", "null"]
+
+    PriceSpreadFlag:
+      type: object
+      required: [minPrice, maxPrice]
+      properties:
+        minPrice:
+          type: number
+        maxPrice:
+          type: number
+
+    MovementProduct:
+      type: object
+      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, isNew]
+      properties:
+        productId:
+          type: integer
+        vpnNormalized:
+          type: string
+        vpnDisplay:
+          type: string
+        brand:
+          type: string
+        description:
+          type: string
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovementSnapshot"
+        latestSoh:
+          type: ["integer", "null"]
+        latestSoo:
+          type: ["integer", "null"]
+        latestSellPrice:
+          type: ["number", "null"]
+        movement:
+          type: ["integer", "null"]
+        movementSinceDate:
+          type: ["string", "null"]
+        isNew:
+          type: boolean
+        priceSpreadFlag:
+          oneOf:
+            - $ref: "#/components/schemas/PriceSpreadFlag"
+            - type: "null"
+
+    MovementDataQuality:
+      type: object
+      required: [snapshotCount, dateRange]
+      properties:
+        snapshotCount:
+          type: integer
+        dateRange:
+          type: object
+          required: [from, to]
+          properties:
+            from:
+              type: ["string", "null"]
+            to:
+              type: ["string", "null"]
+
+    MovementResult:
+      type: object
+      required: [distributorId, distributorName, inferenceMode, dataQuality, products, total, limit, offset]
+      properties:
+        distributorId:
+          type: integer
+        distributorName:
+          type: string
+        inferenceMode:
+          type: string
+          enum: [soh_only, soo_aware]
+        dataQuality:
+          $ref: "#/components/schemas/MovementDataQuality"
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovementProduct"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
           type: integer

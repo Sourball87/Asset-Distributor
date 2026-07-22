@@ -8,6 +8,7 @@ import { eq, desc, inArray, and } from "drizzle-orm";
 import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
+import { logger } from "../lib/logger";
 
 // ---------------------------------------------------------------------------
 // Distributor fingerprints for auto-detection
@@ -312,12 +313,69 @@ async function commitRowsBatched(
 
   if (parsed.length === 0) return 0;
 
-  // 2. Deduplicate products by VPN (first occurrence wins for brand/display)
-  const productsByVpn = new Map<string, ParsedSnapshotRow>();
+  // 2. Aggregate rows by VPN within this import:
+  //    - If all rows for a VPN are identical on (sellPrice, soh, soo) → keep ONE unchanged (no summing).
+  //    - Otherwise: SUM soh (null as 0), SUM soo (null as 0; null only when ALL are null),
+  //      MIN sell_price, first row for brand/description/category.
+  //      When any non-null prices differ by >$1, persist the MAX as sellPriceMax.
+  type AggregatedRow = ParsedSnapshotRow & { sellPriceMax: string | null };
+
+  const groupedByVpn = new Map<string, ParsedSnapshotRow[]>();
   for (const r of parsed) {
-    if (!productsByVpn.has(r.vpnNormalized)) productsByVpn.set(r.vpnNormalized, r);
+    const group = groupedByVpn.get(r.vpnNormalized);
+    if (group) group.push(r);
+    else groupedByVpn.set(r.vpnNormalized, [r]);
   }
-  const uniqueProducts = [...productsByVpn.values()];
+
+  const aggregatedByVpn = new Map<string, AggregatedRow>();
+  for (const [vpn, group] of groupedByVpn) {
+    const first = group[0]!;
+
+    if (group.length === 1) {
+      aggregatedByVpn.set(vpn, { ...first, sellPriceMax: null });
+      continue;
+    }
+
+    // Exact-identical check on (sellPrice, soh, soo) — do NOT sum, keep one unchanged
+    const allIdentical = group.every(
+      (r) => r.sellPrice === first.sellPrice && r.soh === first.soh && r.soo === first.soo,
+    );
+    if (allIdentical) {
+      aggregatedByVpn.set(vpn, { ...first, sellPriceMax: null });
+      continue;
+    }
+
+    // Differing rows — aggregate
+    const sohSum = group.reduce((acc, r) => acc + (r.soh ?? 0), 0);
+    const allSooNull = group.every((r) => r.soo === null);
+    const sooSum = allSooNull ? null : group.reduce((acc, r) => acc + (r.soo ?? 0), 0);
+
+    const prices = group
+      .map((r) => (r.sellPrice != null ? parseFloat(r.sellPrice) : null))
+      .filter((p): p is number => p !== null);
+    const minPrice = prices.length > 0 ? Math.min(...prices) : null;
+    const maxPrice = prices.length > 0 ? Math.max(...prices) : null;
+    const sellPrice = minPrice != null ? String(minPrice) : null;
+
+    let sellPriceMax: string | null = null;
+    if (minPrice != null && maxPrice != null && maxPrice - minPrice > 1) {
+      sellPriceMax = String(maxPrice);
+      logger.warn(
+        { vpn, minPrice, maxPrice, rows: group.length },
+        "sell_price spread >$1 within import — persisting spread, using MIN as sell_price",
+      );
+    }
+
+    aggregatedByVpn.set(vpn, {
+      ...first, // preserves vpnNormalized, vpnDisplay, canonicalBrand, description, category fields
+      sellPrice,
+      soh: sohSum,
+      soo: sooSum,
+      sellPriceMax,
+    });
+  }
+
+  const uniqueProducts = [...aggregatedByVpn.values()];
 
   // 3. Batch insert all products — skip existing ones (first insert wins for brand/description)
   // onConflictDoNothing is deadlock-safe for concurrent imports with overlapping VPNs
@@ -345,8 +403,8 @@ async function commitRowsBatched(
   }
   const vpnToId = new Map<string, number>(productRows.map((p) => [p.vpnNormalized, p.id]));
 
-  // 5. Batch insert all snapshots
-  const snapshots = parsed
+  // 5. Batch insert all snapshots — one row per VPN after aggregation
+  const snapshots = [...aggregatedByVpn.values()]
     .map((r) => {
       const productId = vpnToId.get(r.vpnNormalized);
       if (!productId) return null;
@@ -356,6 +414,7 @@ async function commitRowsBatched(
         productId,
         snapshotDate,
         sellPrice: r.sellPrice,
+        sellPriceMax: r.sellPriceMax,
         soh: r.soh,
         soo: r.soo,
         category: r.category,
