@@ -155,10 +155,13 @@ functional equivalents or close alternatives. Judge ONLY from the provided descr
 — never invent products not in the list. \
 Return ONLY valid JSON (no markdown fences, no explanation) with this shape:
 {"matches":[{"index":<int>,"similarity":"close|partial|related","reason":"<one sentence>"}]}
-Omit candidates that are not comparable. similarity values: \
-"close" = near-identical function and spec class, \
-"partial" = same function, different tier or capacity, \
-"related" = same category but meaningfully different use case.`;
+Omit candidates that are not comparable. Similarity values: \
+"close" = near-identical function and spec class (same CPU tier, same form factor — e.g. U7=U7, i7=i7); \
+"partial" = same function but different tier or capacity (e.g. i5 vs i7, U5 vs U7, or generation gap of 2+); \
+"related" = same category but meaningfully different use case or form factor. \
+CPU tier rule: a different CPU tier (i5 vs i7, U5 vs U7) or a generation gap of 2 or more makes a candidate at most "partial", never "close". \
+Condition rule: if a candidate description indicates a non-new condition (OPEN BOX, EX-DEMO, REFURB, REFURBISHED, CARTON DAMAGE, DEMO, USED, etc.) \
+assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.`;
 
 // ── Main judge call ───────────────────────────────────────────────────────
 

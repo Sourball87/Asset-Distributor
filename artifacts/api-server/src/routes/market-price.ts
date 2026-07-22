@@ -35,6 +35,7 @@ const router = Router();
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const CANDIDATE_LIMIT = 120;
+const BRAND_CAP = 30;        // max candidates per brand before sending to LLM
 const PRICE_BAND_LOW = 0.4;
 const PRICE_BAND_HIGH = 2.5;
 const CACHE_DAYS = 7;
@@ -176,28 +177,42 @@ async function getCandidates(opts: {
         ss.sku_type
       FROM stock_snapshots ss
       ORDER BY ss.product_id, ss.snapshot_date DESC
+    ),
+    raw_candidates AS (
+      SELECT
+        p.id AS product_id,
+        p.brand,
+        p.vpn_display,
+        p.description,
+        latest.sell_price AS latest_price,
+        (
+          SELECT COUNT(*)
+          FROM UNNEST(${kwArray}) AS kw
+          WHERE LOWER(p.description) LIKE '%' || kw || '%'
+        ) AS keyword_overlap
+      FROM products p
+      JOIN latest ON latest.product_id = p.id
+      WHERE p.brand != ${opts.sourceBrand}
+        AND p.id != ${excludeId}
+        AND latest.sell_price IS NOT NULL
+        AND latest.sell_price::numeric BETWEEN ${priceLow} AND ${priceHigh}
+        ${opts.maxPrice != null ? sql`AND latest.sell_price::numeric <= ${opts.maxPrice}` : sql``}
+        AND ${bundleExclude}
+        AND p.description != ''
+        AND RIGHT(p.vpn_display, 3) != '_NZ'
+    ),
+    ranked AS (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY brand
+          ORDER BY keyword_overlap DESC, latest_price::numeric ASC
+        ) AS brand_rank
+      FROM raw_candidates
     )
-    SELECT
-      p.id AS product_id,
-      p.brand,
-      p.vpn_display,
-      p.description,
-      latest.sell_price AS latest_price,
-      (
-        SELECT COUNT(*)
-        FROM UNNEST(${kwArray}) AS kw
-        WHERE LOWER(p.description) LIKE '%' || kw || '%'
-      ) AS keyword_overlap
-    FROM products p
-    JOIN latest ON latest.product_id = p.id
-    WHERE p.brand != ${opts.sourceBrand}
-      AND p.id != ${excludeId}
-      AND latest.sell_price IS NOT NULL
-      AND latest.sell_price::numeric BETWEEN ${priceLow} AND ${priceHigh}
-      ${opts.maxPrice != null ? sql`AND latest.sell_price::numeric <= ${opts.maxPrice}` : sql``}
-      AND ${bundleExclude}
-      AND p.description != ''
-    ORDER BY keyword_overlap DESC, latest.sell_price::numeric ASC
+    SELECT product_id, brand, vpn_display, description, latest_price
+    FROM ranked
+    WHERE brand_rank <= ${BRAND_CAP}
+    ORDER BY keyword_overlap DESC, latest_price::numeric ASC
     LIMIT ${CANDIDATE_LIMIT}
   `);
 
