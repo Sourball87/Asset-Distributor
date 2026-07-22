@@ -705,12 +705,6 @@ paths:
           required: true
           schema:
             type: integer
-        - name: days
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 14
         - name: brand
           in: query
           required: false
@@ -733,6 +727,16 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: excludeBundles
+          in: query
+          required: false
+          description: >
+            When true (default), hide VPNs that start with 'CTO' or contain a literal underscore '_'.
+            These are typically configure-to-order or bundle line items that distort sell-through metrics.
+            Runs on vpn_display (normalization strips underscores from vpn_normalized).
+          schema:
+            type: boolean
+            default: true
         - name: soldOutOnly
           in: query
           required: false
@@ -750,7 +754,7 @@ paths:
         - name: activeOnly
           in: query
           required: false
-          description: When true (default), exclude products with no SOH or SOO in any snapshot within the window
+          description: When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window
           schema:
             type: boolean
             default: true
@@ -760,8 +764,8 @@ paths:
           description: Column to sort by (server-side, applied before pagination)
           schema:
             type: string
-            enum: [vpn, brand, desc, soh, price, estUnitsSold, estRevenue]
-            default: estRevenue
+            enum: [vpn, brand, desc, soh, price, estWeeklyST, estWeeklyRevenue]
+            default: estWeeklyRevenue
         - name: sortDir
           in: query
           required: false
@@ -1271,7 +1275,7 @@ components:
 
     MovementProduct:
       type: object
-      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, estUnitsSold, soldOut, dickerStatus]
+      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, snapshotCount, daysCovered, estUnitsSold, soldOut, dickerStatus]
       properties:
         productId:
           type: integer
@@ -1292,12 +1296,23 @@ components:
           type: ["integer", "null"]
         latestSellPrice:
           type: ["number", "null"]
+        snapshotCount:
+          type: integer
+          description: Number of in-window snapshots for this product
+        daysCovered:
+          type: integer
+          description: Calendar days between first and last in-window snapshot date
         estUnitsSold:
           type: integer
           description: Lower-bound estimate of units sold by this competitor over the window
-        estRevenue:
+        estWeeklyST:
           type: ["number", "null"]
-          description: estUnitsSold * latestSellPrice; null when price unknown
+          description: >
+            Weekly sell-through rate = estUnitsSold / daysCovered * 7, rounded to 1 dp.
+            Null when snapshotCount < 2 or daysCovered < 7 (insufficient data).
+        estWeeklyRevenue:
+          type: ["number", "null"]
+          description: estWeeklyST * latestSellPrice; null when estWeeklyST or price is null
         soldOut:
           type: boolean
           description: latestSoh == 0 AND estUnitsSold > 0
@@ -1308,10 +1323,11 @@ components:
 
     MovementDataQuality:
       type: object
-      required: [snapshotCount, dateRange]
+      required: [snapshotCount, dateRange, bundlesExcluded]
       properties:
         snapshotCount:
           type: integer
+          description: Number of distinct snapshot dates in the window for this distributor
         dateRange:
           type: object
           required: [from, to]
@@ -1320,6 +1336,12 @@ components:
               type: ["string", "null"]
             to:
               type: ["string", "null"]
+        bundlesExcluded:
+          type: integer
+          description: >
+            Count of products matching the bundle/CTO heuristic (vpn_display ILIKE 'CTO%'
+            OR STRPOS(vpn_display, '_') > 0). Shown regardless of excludeBundles flag
+            so PMs can sanity-check for false positives.
 
     MovementResult:
       type: object

@@ -361,13 +361,22 @@ export interface MovementProduct {
   latestSoh?: number | null;
   /** @nullable */
   latestSellPrice?: number | null;
+  /** Number of in-window snapshots for this product */
+  snapshotCount: number;
+  /** Calendar days between first and last in-window snapshot date */
+  daysCovered: number;
   /** Lower-bound estimate of units sold by this competitor over the window */
   estUnitsSold: number;
   /**
-     * estUnitsSold * latestSellPrice; null when price unknown
+     * Weekly sell-through rate = estUnitsSold / daysCovered * 7, rounded to 1 dp. Null when snapshotCount < 2 or daysCovered < 7 (insufficient data).
      * @nullable
      */
-  estRevenue?: number | null;
+  estWeeklyST?: number | null;
+  /**
+     * estWeeklyST * latestSellPrice; null when estWeeklyST or price is null
+     * @nullable
+     */
+  estWeeklyRevenue?: number | null;
   /** latestSoh == 0 AND estUnitsSold > 0 */
   soldOut: boolean;
   /** Dicker Data stock posture for this product */
@@ -382,8 +391,11 @@ export type MovementDataQualityDateRange = {
 };
 
 export interface MovementDataQuality {
+  /** Number of distinct snapshot dates in the window for this distributor */
   snapshotCount: number;
   dateRange: MovementDataQualityDateRange;
+  /** Count of products matching the bundle/CTO heuristic (vpn_display ILIKE 'CTO%' OR STRPOS(vpn_display, '_') > 0). Shown regardless of excludeBundles flag so PMs can sanity-check for false positives. */
+  bundlesExcluded: number;
 }
 
 export type MovementResultInferenceMode = typeof MovementResultInferenceMode[keyof typeof MovementResultInferenceMode];
@@ -431,11 +443,14 @@ pageSize?: number;
 
 export type GetMovementParams = {
 distributorId: number;
-days?: number;
 brand?: string;
 search?: string;
 limit?: number;
 offset?: number;
+/**
+ * When true (default), hide VPNs that start with 'CTO' or contain a literal underscore '_'. These are typically configure-to-order or bundle line items that distort sell-through metrics. Runs on vpn_display (normalization strips underscores from vpn_normalized).
+ */
+excludeBundles?: boolean;
 /**
  * If true, only return products where latest SOH = 0 and estUnitsSold > 0
  */
@@ -445,7 +460,7 @@ soldOutOnly?: boolean;
  */
 notCarriedByDicker?: boolean;
 /**
- * When true (default), exclude products with no SOH or SOO in any snapshot within the window
+ * When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window
  */
 activeOnly?: boolean;
 /**
@@ -467,8 +482,8 @@ export const GetMovementSortBy = {
   desc: 'desc',
   soh: 'soh',
   price: 'price',
-  estUnitsSold: 'estUnitsSold',
-  estRevenue: 'estRevenue',
+  estWeeklyST: 'estWeeklyST',
+  estWeeklyRevenue: 'estWeeklyRevenue',
 } as const;
 
 export type GetMovementSortDir = typeof GetMovementSortDir[keyof typeof GetMovementSortDir];

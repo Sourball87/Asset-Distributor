@@ -8,6 +8,9 @@
 import type { MovementDataQualityDateRange } from './movementDataQualityDateRange';
 
 export interface MovementDataQuality {
+  /** Number of distinct snapshot dates in the window for this distributor */
   snapshotCount: number;
   dateRange: MovementDataQualityDateRange;
+  /** Count of products matching the bundle/CTO heuristic (vpn_display ILIKE 'CTO%' OR STRPOS(vpn_display, '_') > 0). Shown regardless of excludeBundles flag so PMs can sanity-check for false positives. */
+  bundlesExcluded: number;
 }

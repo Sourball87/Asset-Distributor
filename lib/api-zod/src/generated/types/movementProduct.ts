@@ -20,13 +20,22 @@ export interface MovementProduct {
   latestSoh?: number | null;
   /** @nullable */
   latestSellPrice?: number | null;
+  /** Number of in-window snapshots for this product */
+  snapshotCount: number;
+  /** Calendar days between first and last in-window snapshot date */
+  daysCovered: number;
   /** Lower-bound estimate of units sold by this competitor over the window */
   estUnitsSold: number;
   /**
-     * estUnitsSold * latestSellPrice; null when price unknown
+     * Weekly sell-through rate = estUnitsSold / daysCovered * 7, rounded to 1 dp. Null when snapshotCount < 2 or daysCovered < 7 (insufficient data).
      * @nullable
      */
-  estRevenue?: number | null;
+  estWeeklyST?: number | null;
+  /**
+     * estWeeklyST * latestSellPrice; null when estWeeklyST or price is null
+     * @nullable
+     */
+  estWeeklyRevenue?: number | null;
   /** latestSoh == 0 AND estUnitsSold > 0 */
   soldOut: boolean;
   /** Dicker Data stock posture for this product */

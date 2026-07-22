@@ -561,26 +561,26 @@ export const CleanupDuplicatesResponse = zod.object({
  * Returns per-product SOH movement over a look-back window. Inference mode is auto-detected (soo_aware when the latest snapshot has any nonzero SOO, otherwise soh_only). Admin-only.
  * @summary Stock movement analysis for a single distributor
  */
-export const getMovementQueryDaysDefault = 14;
 export const getMovementQueryLimitDefault = 100;
 export const getMovementQueryOffsetDefault = 0;
+export const getMovementQueryExcludeBundlesDefault = true;
 export const getMovementQuerySoldOutOnlyDefault = false;
 export const getMovementQueryNotCarriedByDickerDefault = false;
 export const getMovementQueryActiveOnlyDefault = true;
-export const getMovementQuerySortByDefault = `estRevenue`;
+export const getMovementQuerySortByDefault = `estWeeklyRevenue`;
 export const getMovementQuerySortDirDefault = `desc`;
 
 export const GetMovementQueryParams = zod.object({
   "distributorId": zod.coerce.number(),
-  "days": zod.coerce.number().default(getMovementQueryDaysDefault),
   "brand": zod.coerce.string().optional(),
   "search": zod.coerce.string().optional(),
   "limit": zod.coerce.number().default(getMovementQueryLimitDefault),
   "offset": zod.coerce.number().default(getMovementQueryOffsetDefault),
+  "excludeBundles": zod.coerce.boolean().default(getMovementQueryExcludeBundlesDefault).describe('When true (default), hide VPNs that start with \'CTO\' or contain a literal underscore \'_\'. These are typically configure-to-order or bundle line items that distort sell-through metrics. Runs on vpn_display (normalization strips underscores from vpn_normalized).\n'),
   "soldOutOnly": zod.coerce.boolean().default(getMovementQuerySoldOutOnlyDefault).describe('If true, only return products where latest SOH = 0 and estUnitsSold > 0'),
   "notCarriedByDicker": zod.coerce.boolean().default(getMovementQueryNotCarriedByDickerDefault).describe('If true, only return products with no Dicker Data snapshot'),
-  "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH or SOO in any snapshot within the window'),
-  "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'price', 'estUnitsSold', 'estRevenue']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
+  "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window'),
+  "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'price', 'estWeeklyST', 'estWeeklyRevenue']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
   "sortDir": zod.enum(['asc', 'desc']).default(getMovementQuerySortDirDefault).describe('Sort direction')
 })
 
@@ -589,11 +589,12 @@ export const GetMovementResponse = zod.object({
   "distributorName": zod.string(),
   "inferenceMode": zod.enum(['soh_only', 'soo_aware']),
   "dataQuality": zod.object({
-  "snapshotCount": zod.number(),
+  "snapshotCount": zod.number().describe('Number of distinct snapshot dates in the window for this distributor'),
   "dateRange": zod.object({
   "from": zod.string().nullable(),
   "to": zod.string().nullable()
-})
+}),
+  "bundlesExcluded": zod.number().describe('Count of products matching the bundle\/CTO heuristic (vpn_display ILIKE \'CTO%\' OR STRPOS(vpn_display, \'_\') > 0). Shown regardless of excludeBundles flag so PMs can sanity-check for false positives.\n')
 }),
   "products": zod.array(zod.object({
   "productId": zod.number(),
@@ -609,8 +610,11 @@ export const GetMovementResponse = zod.object({
 })).describe('In-window snapshots ASC — used to render sparkline'),
   "latestSoh": zod.number().nullish(),
   "latestSellPrice": zod.number().nullish(),
+  "snapshotCount": zod.number().describe('Number of in-window snapshots for this product'),
+  "daysCovered": zod.number().describe('Calendar days between first and last in-window snapshot date'),
   "estUnitsSold": zod.number().describe('Lower-bound estimate of units sold by this competitor over the window'),
-  "estRevenue": zod.number().nullish().describe('estUnitsSold \* latestSellPrice; null when price unknown'),
+  "estWeeklyST": zod.number().nullish().describe('Weekly sell-through rate = estUnitsSold \/ daysCovered \* 7, rounded to 1 dp. Null when snapshotCount < 2 or daysCovered < 7 (insufficient data).\n'),
+  "estWeeklyRevenue": zod.number().nullish().describe('estWeeklyST \* latestSellPrice; null when estWeeklyST or price is null'),
   "soldOut": zod.boolean().describe('latestSoh == 0 AND estUnitsSold > 0'),
   "dickerStatus": zod.enum(['stocked', 'listed', 'not carried']).describe('Dicker Data stock posture for this product')
 })),

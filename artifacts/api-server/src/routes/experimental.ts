@@ -118,18 +118,32 @@ router.post("/experimental/cleanup-duplicates", requireAdmin, async (req, res) =
 
 // ---------------------------------------------------------------------------
 // GET /experimental/movement
-// Admin-only. Stock movement analysis for a single distributor.
+// Admin-only. Competitor market intelligence: see what competing distributors
+// are selling so Dicker PMs can gauge whether to range the stock.
+//
+// Fixed 30-day look-back window. Weekly sell-through rate normalises by
+// actual data span (daysCovered), not the window, so sparse feeds don't
+// understate velocity.
 //
 // Query params:
-//   distributorId  (required) integer
-//   days           (default 14) integer — look-back window
-//   brand          string — filter to one canonical brand
-//   search         string — VPN or description substring (case-insensitive)
-//   limit          (default 100) integer
-//   offset         (default 0)  integer
+//   distributorId      (required) integer
+//   brand              string — filter to one canonical brand
+//   search             string — VPN or description substring
+//   activeOnly         (default true) boolean
+//   excludeBundles     (default true) boolean — hide VPNs containing '_' or starting with 'CTO'
+//   soldOutOnly        (default false) boolean
+//   notCarriedByDicker (default false) boolean
+//   sortBy             (default estWeeklyRevenue) enum
+//   sortDir            (default desc) asc|desc
+//   limit              (default 100, max 500) integer
+//   offset             (default 0) integer
 //
 // Response: MovementResult — see openapi.yaml
 // ---------------------------------------------------------------------------
+
+// Fixed look-back window (days)
+const WINDOW_DAYS = 30;
+
 router.get("/experimental/movement", requireAdmin, async (req, res) => {
   const distId = parseInt(String(req.query.distributorId), 10);
   if (!distId || isNaN(distId)) {
@@ -137,23 +151,23 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     return;
   }
 
-  const days       = Math.max(1, parseInt(String(req.query.days   ?? "14"), 10) || 14);
   const limit      = Math.min(500, Math.max(1, parseInt(String(req.query.limit  ?? "100"), 10) || 100));
   const offset     = Math.max(0, parseInt(String(req.query.offset ?? "0"),  10) || 0);
   const brand      = req.query.brand  ? String(req.query.brand).trim()  : null;
   const search     = req.query.search ? String(req.query.search).trim() : null;
-  const activeOnly = req.query.activeOnly !== "false";
-
-  const validSortBy  = ["vpn", "brand", "desc", "soh", "price", "estUnitsSold", "estRevenue"] as const;
-  type SortByCol = typeof validSortBy[number];
-  const sortByRaw    = String(req.query.sortBy ?? "estRevenue");
-  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "estRevenue";
-  const sortDir      = req.query.sortDir === "asc" ? "asc" : "desc";
+  const activeOnly         = req.query.activeOnly         !== "false";
+  const excludeBundles     = req.query.excludeBundles     !== "false";
   const soldOutOnly        = req.query.soldOutOnly        === "true";
   const notCarriedByDicker = req.query.notCarriedByDicker === "true";
 
+  const validSortBy  = ["vpn", "brand", "desc", "soh", "price", "estWeeklyST", "estWeeklyRevenue"] as const;
+  type SortByCol = typeof validSortBy[number];
+  const sortByRaw    = String(req.query.sortBy ?? "estWeeklyRevenue");
+  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "estWeeklyRevenue";
+  const sortDir      = req.query.sortDir === "asc" ? "asc" : "desc";
+
   try {
-    // Resolve distributor name
+    // Resolve distributor
     const [distributor] = await db
       .select({ id: distributorsTable.id, name: distributorsTable.name })
       .from(distributorsTable)
@@ -171,9 +185,9 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       .where(eq(distributorsTable.isBaseline, true));
     const baselineDistId = baseline?.id ?? null;
 
-    // Cutoff date (days look-back from today)
+    // Fixed 30-day look-back window
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setDate(cutoff.getDate() - WINDOW_DAYS);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
 
     // Determine inference mode: does the latest snapshot have any nonzero SOO?
@@ -190,7 +204,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const inferenceMode: "soo_aware" | "soh_only" =
       hasSoo === true || hasSoo === "true" ? "soo_aware" : "soh_only";
 
-    // Data quality: snapshot dates available in the window
+    // Data quality: snapshot dates in the window
     const dqRows = await db.execute<{ cnt: string; min_date: string | null; max_date: string | null }>(sql`
       SELECT COUNT(DISTINCT snapshot_date) AS cnt,
              MIN(snapshot_date)            AS min_date,
@@ -199,21 +213,35 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       WHERE distributor_id = ${distId}
         AND snapshot_date >= ${cutoffStr}::date
     `);
-    const dqRow  = dqRows.rows[0];
+    const dqRow = dqRows.rows[0];
+
+    // Bundle/CTO exclusion count (always computed so PMs can sanity-check the heuristic).
+    // Rule: vpn_display starts with 'CTO' OR contains literal '_'.
+    // STRPOS is used instead of LIKE to avoid _ being treated as a wildcard.
+    const bundleCountRows = await db.execute<{ excluded: string }>(sql`
+      SELECT COUNT(DISTINCT ss.product_id) AS excluded
+      FROM stock_snapshots ss
+      JOIN products p ON p.id = ss.product_id
+      WHERE ss.distributor_id = ${distId}
+        AND ss.snapshot_date >= ${cutoffStr}::date
+        AND (p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0)
+    `);
+    const bundlesExcluded = parseInt(String(bundleCountRows.rows[0]?.excluded ?? "0"), 10);
+
     const dataQuality = {
       snapshotCount: parseInt(String(dqRow?.cnt ?? "0"), 10),
-      dateRange: {
-        from: dqRow?.min_date ?? null,
-        to:   dqRow?.max_date ?? null,
-      },
+      dateRange: { from: dqRow?.min_date ?? null, to: dqRow?.max_date ?? null },
+      bundlesExcluded,
     };
 
-    // Build WHERE conditions for the product filter
-    const brandCondition  = brand  ? eq(productsTable.brand, brand)                                   : undefined;
-    const searchCondition = search ? sql`(${productsTable.vpnNormalized} ILIKE ${"%" + search + "%"} OR ${productsTable.description} ILIKE ${"%" + search + "%"})` : undefined;
+    // --- SQL building blocks ---
 
-    // When activeOnly=true, include products with any stock, any SOO, or any
-    // SOH movement in the window (sold-out-with-recent-movement must appear).
+    // Bundle/CTO exclusion filter (runs on vpn_display — normalization strips underscores)
+    const bundleFilter = excludeBundles
+      ? sql`AND NOT (p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0)`
+      : sql``;
+
+    // FIX 2: activeOnly includes sold-out products that had movement in the window
     const activeFilter = activeOnly
       ? sql`AND ss.product_id IN (
           SELECT product_id FROM stock_snapshots
@@ -227,7 +255,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         )`
       : sql``;
 
-    // SQL fragment for est_units_sold — mirrors classifyMovement() exactly
+    // estUnitsSold SQL formula — mirrors classifyMovement() exactly
     const estUnitsSoldExpr = sql.raw(`COALESCE(SUM(
       CASE
         WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
@@ -238,10 +266,12 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       END
     ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)`);
 
-    // soldOutOnly / notCarriedByDicker post-aggregation filters
+    // soldOutOnly post-aggregation HAVING condition
     const soldOutHaving = soldOutOnly
       ? sql.raw(`AND MAX(soh) FILTER (WHERE rn = 1) = 0 AND ${estUnitsSoldExpr.queryChunks.join("")} > 0`)
       : sql``;
+
+    // notCarriedByDicker post-aggregation WHERE condition
     const notCarriedFilter =
       notCarriedByDicker && baselineDistId != null
         ? sql`AND product_id NOT IN (
@@ -250,7 +280,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           )`
         : sql``;
 
-    // Count query — uses same CTE + filter stack for accurate pagination totals
+    // --- Count query (same filter stack as paginated query for accurate totals) ---
     const countRows = await db.execute<{ total: string }>(sql`
       WITH ordered AS (
         SELECT
@@ -265,6 +295,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         WHERE ss.distributor_id = ${distId}
           AND ss.snapshot_date >= ${cutoffStr}::date
           ${activeFilter}
+          ${bundleFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
           ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),
@@ -272,7 +303,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         SELECT
           product_id,
           MAX(soh) FILTER (WHERE rn = 1) AS latest_soh,
-          ${estUnitsSoldExpr} AS est_units_sold
+          ${estUnitsSoldExpr}             AS est_units_sold
         FROM ordered
         GROUP BY product_id
         HAVING 1=1 ${soldOutHaving}
@@ -281,20 +312,21 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     `);
     const total = parseInt(String(countRows.rows[0]?.total ?? "0"), 10);
 
-    // Build sort expression using sql.raw() so column/direction aren't parameterized
+    // --- Sort expression (sql.raw so column/direction aren't parameterized) ---
     const sortColName =
-      sortBy === "soh"          ? "agg.latest_soh"
-      : sortBy === "price"      ? "agg.latest_price"
-      : sortBy === "estUnitsSold" ? "agg.est_units_sold"
-      : sortBy === "estRevenue"   ? "agg.est_revenue"
-      : sortBy === "vpn"        ? "p.vpn_normalized"
-      : sortBy === "brand"      ? "p.brand"
-      :                           "p.description";
+      sortBy === "soh"              ? "agg.latest_soh"
+      : sortBy === "price"          ? "agg.latest_price"
+      : sortBy === "estWeeklyST"    ? "agg.est_weekly_st"
+      : sortBy === "estWeeklyRevenue" ? "agg.est_weekly_revenue"
+      : sortBy === "vpn"            ? "p.vpn_normalized"
+      : sortBy === "brand"          ? "p.brand"
+      :                               "p.description";
     const orderByClause = sql.raw(`${sortColName} ${sortDir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
 
-    // Paginated product list — CTE computes estUnitsSold + estRevenue, applies
-    // soldOutOnly/notCarriedByDicker filters, sorts, then paginates.
-    // FIX 1: sort order is preserved; client iterates productIds[] in CTE order.
+    // --- Paginated product list ---
+    // CTE computes estUnitsSold, weekly sell-through rate (normalised by actual
+    // daysCovered, not window), sorts, then paginates.
+    // FIX 1: sort order preserved — client iterates productIds[] in CTE order.
     const productIdRows = await db.execute<{ product_id: string }>(sql`
       WITH ordered AS (
         SELECT
@@ -302,6 +334,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           ss.soh,
           ss.soo,
           ss.sell_price,
+          ss.snapshot_date,
           LAG(ss.soh) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soh,
           LAG(ss.soo) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soo,
           ROW_NUMBER() OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date DESC) AS rn
@@ -310,16 +343,33 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         WHERE ss.distributor_id = ${distId}
           AND ss.snapshot_date >= ${cutoffStr}::date
           ${activeFilter}
+          ${bundleFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
           ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),
       agg AS (
         SELECT
           product_id,
+          COUNT(*)                        AS snap_count,
           MAX(soh)        FILTER (WHERE rn = 1) AS latest_soh,
           MAX(sell_price) FILTER (WHERE rn = 1) AS latest_price,
-          ${estUnitsSoldExpr}                    AS est_units_sold,
-          ${estUnitsSoldExpr} * MAX(sell_price) FILTER (WHERE rn = 1) AS est_revenue
+          MAX(snapshot_date) - MIN(snapshot_date) AS days_covered,
+          ${estUnitsSoldExpr}             AS est_units_sold,
+          CASE
+            WHEN COUNT(*) >= 2
+              AND (MAX(snapshot_date) - MIN(snapshot_date)) >= 7
+            THEN ${estUnitsSoldExpr} * 7.0
+                 / GREATEST(1, MAX(snapshot_date) - MIN(snapshot_date))
+            ELSE NULL
+          END AS est_weekly_st,
+          CASE
+            WHEN COUNT(*) >= 2
+              AND (MAX(snapshot_date) - MIN(snapshot_date)) >= 7
+            THEN ${estUnitsSoldExpr} * 7.0
+                 / GREATEST(1, MAX(snapshot_date) - MIN(snapshot_date))
+                 * MAX(sell_price) FILTER (WHERE rn = 1)
+            ELSE NULL
+          END AS est_weekly_revenue
         FROM ordered
         GROUP BY product_id
         HAVING 1=1 ${soldOutHaving}
@@ -335,7 +385,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
 
     if (productIds.length === 0) {
       res.json({
-        distributorId:  distId,
+        distributorId:   distId,
         distributorName: distributor.name,
         inferenceMode,
         dataQuality,
@@ -347,17 +397,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       return;
     }
 
-    // Fetch all snapshots in window for the paginated products
+    // Fetch all in-window snapshots for the paginated products (for sparkline + classifier)
     type SnapshotRow = {
-      product_id:    string;
+      product_id:     string;
       vpn_normalized: string;
-      vpn_display:   string;
-      brand:         string;
-      description:   string;
-      snapshot_date: string;
-      soh:           string | null;
-      soo:           string | null;
-      sell_price:    string | null;
+      vpn_display:    string;
+      brand:          string;
+      description:    string;
+      snapshot_date:  string;
+      soh:            string | null;
+      soo:            string | null;
+      sell_price:     string | null;
       sell_price_max: string | null;
     };
 
@@ -406,20 +456,24 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       else byProduct.set(pid, [row]);
     }
 
-    // FIX 1: iterate productIds in server-sort order so the JSON response
-    // preserves the sort the CTE computed (Map iteration order is insertion
-    // order, which is snapshot row order — not the sorted product order).
+    // FIX 1: iterate productIds in CTE sort order (not Map insertion order)
     const products = productIds
       .filter((pid) => byProduct.has(pid))
       .map((pid) => {
-        const snaps  = byProduct.get(pid)!;
-        const sorted = snaps; // already ASC from DB
+        const sorted = byProduct.get(pid)!; // ASC by snapshot_date from DB
         const latest = sorted[sorted.length - 1]!;
 
-        const latestSoh  = latest.soh       != null ? parseInt(String(latest.soh),      10) : null;
-        const latestSell = latest.sell_price != null ? parseFloat(latest.sell_price)        : null;
+        const latestSoh  = latest.soh       != null ? parseInt(String(latest.soh), 10) : null;
+        const latestSell = latest.sell_price != null ? parseFloat(latest.sell_price)   : null;
 
-        // Classifier: see movement-classifier.ts — estimates units sold by competitor
+        const snapshotCount = sorted.length;
+        const firstDate = sorted[0]!.snapshot_date;
+        const lastDate  = sorted[snapshotCount - 1]!.snapshot_date;
+        const daysCovered = Math.round(
+          (new Date(lastDate).getTime() - new Date(firstDate).getTime()) / 86_400_000,
+        );
+
+        // Classifier: lower-bound estimate of units sold by this competitor
         const { estUnitsSold } = classifyMovement(
           sorted.map((s) => ({
             soh: s.soh != null ? parseInt(String(s.soh), 10) : null,
@@ -427,13 +481,21 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           })),
         );
 
-        const estRevenue = estUnitsSold > 0 && latestSell != null
-          ? estUnitsSold * latestSell
-          : null;
+        // Weekly sell-through: normalised by actual data span, not window.
+        // Null when daysCovered < 7 or fewer than 2 snapshots (insufficient data).
+        const estWeeklyST =
+          snapshotCount >= 2 && daysCovered >= 7
+            ? Math.round((estUnitsSold / daysCovered) * 7 * 10) / 10
+            : null;
+
+        const estWeeklyRevenue =
+          estWeeklyST != null && latestSell != null
+            ? Math.round(estWeeklyST * latestSell * 100) / 100
+            : null;
 
         const soldOut = latestSoh === 0 && estUnitsSold > 0;
 
-        // Dicker status: did Dicker have stock on the latest snapshot?
+        // Dicker status: stocked / listed / not carried
         const dickerLatestSoh = dickerByProduct.get(pid);
         const dickerStatus: "stocked" | "listed" | "not carried" =
           dickerLatestSoh === undefined
@@ -450,14 +512,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           description:     latest.description,
           snapshots:       sorted.map((s) => ({
             snapshotDate: s.snapshot_date,
-            soh:          s.soh       != null ? parseInt(String(s.soh),  10) : null,
-            soo:          s.soo       != null ? parseInt(String(s.soo),  10) : null,
-            sellPrice:    s.sell_price != null ? parseFloat(s.sell_price)    : null,
+            soh:          s.soh       != null ? parseInt(String(s.soh), 10) : null,
+            soo:          s.soo       != null ? parseInt(String(s.soo), 10) : null,
+            sellPrice:    s.sell_price != null ? parseFloat(s.sell_price)   : null,
           })),
           latestSoh,
           latestSellPrice: latestSell,
+          snapshotCount,
+          daysCovered,
           estUnitsSold,
-          estRevenue,
+          estWeeklyST,
+          estWeeklyRevenue,
           soldOut,
           dickerStatus,
         };

@@ -10,11 +10,14 @@ import type { GetMovementSortDir } from './getMovementSortDir';
 
 export type GetMovementParams = {
 distributorId: number;
-days?: number;
 brand?: string;
 search?: string;
 limit?: number;
 offset?: number;
+/**
+ * When true (default), hide VPNs that start with 'CTO' or contain a literal underscore '_'. These are typically configure-to-order or bundle line items that distort sell-through metrics. Runs on vpn_display (normalization strips underscores from vpn_normalized).
+ */
+excludeBundles?: boolean;
 /**
  * If true, only return products where latest SOH = 0 and estUnitsSold > 0
  */
@@ -24,7 +27,7 @@ soldOutOnly?: boolean;
  */
 notCarriedByDicker?: boolean;
 /**
- * When true (default), exclude products with no SOH or SOO in any snapshot within the window
+ * When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window
  */
 activeOnly?: boolean;
 /**

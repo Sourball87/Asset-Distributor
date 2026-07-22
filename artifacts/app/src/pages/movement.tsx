@@ -96,22 +96,22 @@ function DickerBadge({ status }: { status: DickerStatus }) {
   );
 }
 
-type SortCol = "vpn" | "brand" | "desc" | "soh" | "price" | "estUnitsSold" | "estRevenue";
-const NUM_COLS: SortCol[] = ["soh", "price", "estUnitsSold", "estRevenue"];
+type SortCol = "vpn" | "brand" | "desc" | "soh" | "price" | "estWeeklyST" | "estWeeklyRevenue";
+const NUM_COLS: SortCol[] = ["soh", "price", "estWeeklyST", "estWeeklyRevenue"];
 
 export default function Movement() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const [distributorId, setDistributorId] = useState<string>("");
-  const [days, setDays] = useState<string>("30");
   const [brand, setBrand] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
   const [offset, setOffset] = useState(0);
-  const [sortCol, setSortCol] = useState<SortCol>("estRevenue");
+  const [sortCol, setSortCol] = useState<SortCol>("estWeeklyRevenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [activeOnly, setActiveOnly] = useState(true);
+  const [excludeBundles, setExcludeBundles] = useState(true);
   const [soldOutOnly, setSoldOutOnly] = useState(false);
   const [notCarriedByDicker, setNotCarriedByDicker] = useState(false);
 
@@ -124,10 +124,10 @@ export default function Movement() {
   const { data, isLoading, isError } = useGetMovement(
     {
       distributorId: distIdNum!,
-      days: parseInt(days, 10),
       ...(brand ? { brand } : {}),
       ...(search ? { search } : {}),
       activeOnly,
+      excludeBundles,
       soldOutOnly,
       notCarriedByDicker,
       sortBy: sortCol,
@@ -140,10 +140,10 @@ export default function Movement() {
         enabled,
         queryKey: getGetMovementQueryKey({
           distributorId: distIdNum!,
-          days: parseInt(days, 10),
           brand: brand || undefined,
           search: search || undefined,
           activeOnly,
+          excludeBundles,
           soldOutOnly,
           notCarriedByDicker,
           sortBy: sortCol,
@@ -201,13 +201,13 @@ export default function Movement() {
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
 
   const colDefs: { key: SortCol; label: string; right?: boolean; width?: string }[] = [
-    { key: "vpn",          label: "VPN",          width: "w-36" },
-    { key: "brand",        label: "Brand",         width: "w-24" },
-    { key: "desc",         label: "Description" },
-    { key: "estUnitsSold", label: "Est. sold",     right: true, width: "w-24" },
-    { key: "price",        label: "Their price",   right: true, width: "w-24" },
-    { key: "estRevenue",   label: "Est. revenue",  right: true, width: "w-28" },
-    { key: "soh",          label: "Their SOH",     right: true, width: "w-20" },
+    { key: "vpn",              label: "VPN",                width: "w-36" },
+    { key: "brand",            label: "Brand",              width: "w-24" },
+    { key: "desc",             label: "Description" },
+    { key: "estWeeklyST",      label: "Est. weekly ST",     right: true, width: "w-28" },
+    { key: "price",            label: "Their price",        right: true, width: "w-24" },
+    { key: "estWeeklyRevenue", label: "Est. weekly rev.",   right: true, width: "w-28" },
+    { key: "soh",              label: "Their SOH",          right: true, width: "w-20" },
   ];
 
   return (
@@ -250,18 +250,6 @@ export default function Movement() {
                   {d.name}
                 </SelectItem>
               ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={days} onValueChange={(v) => { setDays(v); resetPaging(); }}>
-          <SelectTrigger className="h-7 w-28 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7"  className="text-xs">7 days</SelectItem>
-            <SelectItem value="14" className="text-xs">14 days</SelectItem>
-            <SelectItem value="30" className="text-xs">30 days</SelectItem>
-            <SelectItem value="60" className="text-xs">60 days</SelectItem>
           </SelectContent>
         </Select>
 
@@ -355,6 +343,17 @@ export default function Movement() {
         >
           Hide inactive lines
         </button>
+
+        <button
+          onClick={() => { setExcludeBundles((v) => !v); resetPaging(); }}
+          className={`h-7 px-2.5 rounded-sm border text-xs transition-colors select-none ${
+            excludeBundles
+              ? "bg-secondary text-secondary-foreground border-border font-medium"
+              : "text-muted-foreground border-border hover:bg-secondary/50"
+          }`}
+        >
+          Hide bundles/CTO
+        </button>
       </div>
 
       {/* Inference mode / data quality strip */}
@@ -364,7 +363,7 @@ export default function Movement() {
             {data.inferenceMode === "soo_aware" ? "SOO-aware" : "SOH-only"}
           </Badge>
           <span className="text-muted-foreground/70">
-            Estimates are minimums — actual sales may be higher.
+            Weekly rates normalised to actual data span, not window.
           </span>
           {data.dataQuality.dateRange.from && (
             <span>
@@ -375,6 +374,12 @@ export default function Movement() {
             {data.dataQuality.snapshotCount} snapshot
             {data.dataQuality.snapshotCount !== 1 ? "s" : ""} in window
           </span>
+          {data.dataQuality.bundlesExcluded > 0 && (
+            <span className="text-muted-foreground/60">
+              {data.dataQuality.bundlesExcluded.toLocaleString()} bundles/CTO
+              {excludeBundles ? " hidden" : " shown"}
+            </span>
+          )}
           <span className="ml-auto font-mono">{total.toLocaleString()} products</span>
         </div>
       )}
@@ -404,7 +409,7 @@ export default function Movement() {
           {data.dataQuality.dateRange.to && (
             <p className="text-xs text-muted-foreground">
               Most recent snapshot:{" "}
-              <span className="font-mono">{fmtDate(data.dataQuality.dateRange.to)}</span> — try a wider window.
+              <span className="font-mono">{fmtDate(data.dataQuality.dateRange.to)}</span>
             </p>
           )}
         </div>
@@ -429,9 +434,7 @@ export default function Movement() {
                       onClick={() => handleSort(key)}
                       className={`px-3 py-2 font-semibold text-muted-foreground select-none cursor-pointer hover:text-foreground transition-colors ${right ? "text-right" : "text-left"} ${width ?? ""} ${active ? "text-foreground" : ""}`}
                     >
-                      <span
-                        className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}
-                      >
+                      <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
                         {label}
                         <Icon className="h-3 w-3 shrink-0" />
                       </span>
@@ -449,8 +452,14 @@ export default function Movement() {
             <tbody>
               {products.map((p, i) => {
                 const isEven = i % 2 === 0;
-                // Highlight: sold out at competitor AND not carried by Dicker
                 const isOpportunity = p.soldOut && p.dickerStatus === "not carried";
+
+                // Per-row data quality subtext: shown when we have enough snapshots
+                const hasSufficientData =
+                  p.snapshotCount != null &&
+                  p.daysCovered != null &&
+                  p.snapshotCount >= 2 &&
+                  p.daysCovered >= 7;
 
                 return (
                   <tr
@@ -468,23 +477,41 @@ export default function Movement() {
                     <td className="px-3 py-1.5 text-muted-foreground max-w-xs truncate">
                       {p.description}
                     </td>
+
+                    {/* Est. weekly ST */}
                     <td className="px-3 py-1.5 text-right font-mono">
-                      {p.estUnitsSold > 0 ? (
-                        <span>{fmt(p.estUnitsSold)}</span>
+                      {hasSufficientData ? (
+                        <div>
+                          <div>{p.estWeeklyST != null ? fmt(p.estWeeklyST, 1) : "—"}</div>
+                          <div className="text-[10px] text-muted-foreground/60 font-sans">
+                            {p.snapshotCount} snaps / {p.daysCovered}d
+                          </div>
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span
+                          className="text-muted-foreground/50"
+                          title="Insufficient data — need at least 2 snapshots covering 7+ days"
+                        >
+                          —
+                        </span>
                       )}
                     </td>
+
+                    {/* Their price */}
                     <td className="px-3 py-1.5 text-right font-mono">
                       {fmtPrice(p.latestSellPrice)}
                     </td>
+
+                    {/* Est. weekly revenue */}
                     <td className="px-3 py-1.5 text-right font-mono">
-                      {p.estRevenue != null ? (
-                        fmtPrice(p.estRevenue)
+                      {p.estWeeklyRevenue != null ? (
+                        fmtPrice(p.estWeeklyRevenue)
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground/50">—</span>
                       )}
                     </td>
+
+                    {/* Their SOH */}
                     <td className="px-3 py-1.5 text-right font-mono">
                       {p.soldOut ? (
                         <span className="text-rose-600 dark:text-rose-400 font-medium">
@@ -494,6 +521,7 @@ export default function Movement() {
                         fmt(p.latestSoh)
                       )}
                     </td>
+
                     <td className="px-3 py-1.5 text-center">
                       <DickerBadge status={p.dickerStatus as DickerStatus} />
                     </td>
