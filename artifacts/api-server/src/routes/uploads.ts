@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { parse as csvParseSync } from "csv-parse/sync";
 import { db, distributorsTable, importProfilesTable, uploadsTable, productsTable, stockSnapshotsTable } from "@workspace/db";
-import { eq, desc, inArray, and } from "drizzle-orm";
+import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { requireAuth, requireElevatedRole } from "../middlewares/auth";
 import { buildBrandMap, resolveCanonicalBrand } from "../lib/brands";
 import { normalizeVpn } from "../lib/vpn";
@@ -377,8 +377,12 @@ async function commitRowsBatched(
 
   const uniqueProducts = [...aggregatedByVpn.values()];
 
-  // 3. Batch insert all products — skip existing ones (first insert wins for brand/description)
-  // onConflictDoNothing is deadlock-safe for concurrent imports with overlapping VPNs
+  // 3. Upsert products — first insert wins for brand/vpnDisplay; description uses
+  // longest-wins: if the incoming description is ≥30% longer than the stored one,
+  // it replaces it so that richer feeds progressively improve the catalogue.
+  // COALESCE on the stored length handles null/empty stored descriptions (any
+  // non-empty incoming value wins). Other columns (brand, vpnDisplay) are untouched
+  // on conflict to preserve the original canonical values.
   for (let i = 0; i < uniqueProducts.length; i += DB_CHUNK) {
     const chunk = uniqueProducts.slice(i, i + DB_CHUNK);
     await db.insert(productsTable)
@@ -388,7 +392,17 @@ async function commitRowsBatched(
         brand: r.canonicalBrand,
         description: r.description,
       })))
-      .onConflictDoNothing({ target: productsTable.vpnNormalized });
+      .onConflictDoUpdate({
+        target: productsTable.vpnNormalized,
+        set: {
+          // EXCLUDED.description = proposed value; products.description = existing row
+          description: sql`CASE
+            WHEN LENGTH(EXCLUDED.description) >= COALESCE(LENGTH(${productsTable.description}), 0) * 1.3
+            THEN EXCLUDED.description
+            ELSE ${productsTable.description}
+          END`,
+        },
+      });
   }
 
   // 4. Fetch all product IDs in one query

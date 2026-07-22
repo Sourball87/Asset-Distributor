@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Distributor price files — contain buy prices, must not enter version control
+attached_assets/
