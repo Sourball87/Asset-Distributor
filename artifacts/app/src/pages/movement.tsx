@@ -43,7 +43,7 @@ export default function Movement() {
   const queryClient = useQueryClient();
 
   const [distributorId, setDistributorId] = useState<string>("");
-  const [days, setDays] = useState<string>("14");
+  const [days, setDays] = useState<string>("30");
   const [brand, setBrand] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
@@ -242,8 +242,13 @@ export default function Movement() {
 
       {/* Table */}
       {data && products.length === 0 && (
-        <div className="border rounded-sm bg-card p-8 text-center text-sm text-muted-foreground">
-          No products found in this window.
+        <div className="border rounded-sm bg-card p-8 text-center space-y-1">
+          <p className="text-sm text-muted-foreground">No snapshots found in the last {days} days.</p>
+          {data.dataQuality.dateRange.to && (
+            <p className="text-xs text-muted-foreground">
+              Most recent snapshot: <span className="font-mono">{fmtDate(data.dataQuality.dateRange.to)}</span> — try a wider window.
+            </p>
+          )}
         </div>
       )}
 
