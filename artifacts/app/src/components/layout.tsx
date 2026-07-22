@@ -102,7 +102,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <>
               <Separator className="my-4" />
               <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Experimental
+                Experimental <span className="normal-case font-normal">(admin only)</span>
               </div>
               <nav className="space-y-0.5 px-2">
                 {experimentalItems.map((item) => (
