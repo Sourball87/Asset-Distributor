@@ -215,16 +215,23 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     `);
     const dqRow = dqRows.rows[0];
 
-    // Bundle/CTO exclusion count (always computed so PMs can sanity-check the heuristic).
-    // Rule: vpn_display starts with 'CTO' OR contains literal '_'.
-    // STRPOS is used instead of LIKE to avoid _ being treated as a wildcard.
+    // Bundle/CTO exclusion count (always computed so PMs can sanity-check).
+    // Primary signal: ss.sku_type = 'BundledItem' when the feed populates it (e.g. Dicker Data).
+    // Fallback heuristic: vpn_display starts with 'CTO' OR contains a literal '_'.
+    // STRPOS is used instead of LIKE because '_' is a wildcard in LIKE patterns.
     const bundleCountRows = await db.execute<{ excluded: string }>(sql`
       SELECT COUNT(DISTINCT ss.product_id) AS excluded
       FROM stock_snapshots ss
       JOIN products p ON p.id = ss.product_id
       WHERE ss.distributor_id = ${distId}
         AND ss.snapshot_date >= ${cutoffStr}::date
-        AND (p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0)
+        AND (
+          CASE
+            WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
+            THEN ss.sku_type = 'BundledItem'
+            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+          END
+        )
     `);
     const bundlesExcluded = parseInt(String(bundleCountRows.rows[0]?.excluded ?? "0"), 10);
 
@@ -236,9 +243,18 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
 
     // --- SQL building blocks ---
 
-    // Bundle/CTO exclusion filter (runs on vpn_display — normalization strips underscores)
+    // Bundle/CTO exclusion filter.
+    // Primary signal: ss.sku_type = 'BundledItem' (populated by Dicker Data and any future
+    // distributor whose feed carries it). Fallback heuristic when sku_type is null: vpn_display
+    // starts with 'CTO' OR contains a literal '_' (STRPOS, not LIKE, to avoid wildcard treatment).
     const bundleFilter = excludeBundles
-      ? sql`AND NOT (p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0)`
+      ? sql`AND NOT (
+          CASE
+            WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
+            THEN ss.sku_type = 'BundledItem'
+            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+          END
+        )`
       : sql``;
 
     // FIX 2: activeOnly includes sold-out products that had movement in the window
