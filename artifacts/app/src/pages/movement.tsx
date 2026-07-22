@@ -162,7 +162,7 @@ export default function Movement() {
             <SelectValue placeholder="Select distributor…" />
           </SelectTrigger>
           <SelectContent>
-            {distributors.map((d) => (
+            {distributors.filter((d) => !d.isBaseline).map((d) => (
               <SelectItem key={d.id} value={String(d.id)} className="text-xs">{d.name}</SelectItem>
             ))}
           </SelectContent>
