@@ -225,12 +225,13 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       JOIN products p ON p.id = ss.product_id
       WHERE ss.distributor_id = ${distId}
         AND ss.snapshot_date >= ${cutoffStr}::date
-        AND (
+        AND COALESCE(
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
             ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
-          END
+          END,
+          FALSE
         )
     `);
     const bundlesExcluded = parseInt(String(bundleCountRows.rows[0]?.excluded ?? "0"), 10);
@@ -247,13 +248,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     // Primary signal: ss.sku_type = 'BundledItem' (populated by Dicker Data and any future
     // distributor whose feed carries it). Fallback heuristic when sku_type is null: vpn_display
     // starts with 'CTO' OR contains a literal '_' (STRPOS, not LIKE, to avoid wildcard treatment).
+    // COALESCE(…, FALSE) makes the expression NULL-safe: if vpn_display is ever null
+    // (and sku_type is also null), the ELSE branch would yield NULL, making NOT NULL = NULL
+    // which silently drops the row from WHERE. COALESCE treats that as FALSE → row included.
     const bundleFilter = excludeBundles
-      ? sql`AND NOT (
+      ? sql`AND NOT COALESCE(
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
             ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
-          END
+          END,
+          FALSE
         )`
       : sql``;
 
