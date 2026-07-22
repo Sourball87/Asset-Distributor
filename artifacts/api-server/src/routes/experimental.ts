@@ -143,6 +143,12 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
   const search     = req.query.search ? String(req.query.search).trim() : null;
   const activeOnly = req.query.activeOnly !== "false";
 
+  const validSortBy  = ["vpn", "brand", "desc", "soh", "soo", "price", "movement"] as const;
+  type SortByCol = typeof validSortBy[number];
+  const sortByRaw    = String(req.query.sortBy ?? "soh");
+  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "soh";
+  const sortDir      = req.query.sortDir === "asc" ? "asc" : "desc";
+
   try {
     // Resolve distributor name
     const [distributor] = await db
@@ -219,17 +225,48 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     `);
     const total = parseInt(String(countRows.rows[0]?.total ?? "0"), 10);
 
-    // Paginated product list (ordered by VPN)
+    // Build sort expression — computed in a CTE so pagination is on the sorted result
+    const sortColSql =
+      sortBy === "soh"      ? sql`agg.latest_soh`
+      : sortBy === "soo"    ? sql`agg.latest_soo`
+      : sortBy === "price"  ? sql`agg.latest_price`
+      : sortBy === "movement" ? sql`agg.movement`
+      : sortBy === "vpn"    ? sql`p.vpn_normalized`
+      : sortBy === "brand"  ? sql`p.brand`
+      :                       sql`p.description`;
+    const dirSql = sortDir === "asc" ? sql`ASC` : sql`DESC`;
+
+    // Paginated product list — CTE computes latest/prev snapshot values then sorts
     const productIdRows = await db.execute<{ product_id: string }>(sql`
-      SELECT DISTINCT ss.product_id
-      FROM stock_snapshots ss
-      JOIN products p ON p.id = ss.product_id
-      WHERE ss.distributor_id = ${distId}
-        AND ss.snapshot_date >= ${cutoffStr}::date
-        ${activeFilter}
-        ${brand  ? sql`AND p.brand = ${brand}` : sql``}
-        ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
-      ORDER BY ss.product_id
+      WITH ranked AS (
+        SELECT
+          ss.product_id,
+          ss.soh,
+          ss.soo,
+          ss.sell_price,
+          ROW_NUMBER() OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date DESC) AS rn
+        FROM stock_snapshots ss
+        JOIN products p ON p.id = ss.product_id
+        WHERE ss.distributor_id = ${distId}
+          AND ss.snapshot_date >= ${cutoffStr}::date
+          ${activeFilter}
+          ${brand  ? sql`AND p.brand = ${brand}` : sql``}
+          ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
+      ),
+      agg AS (
+        SELECT
+          product_id,
+          MAX(soh)        FILTER (WHERE rn = 1) AS latest_soh,
+          MAX(soo)        FILTER (WHERE rn = 1) AS latest_soo,
+          MAX(sell_price) FILTER (WHERE rn = 1) AS latest_price,
+          (MAX(soh) FILTER (WHERE rn = 1)) - (MAX(soh) FILTER (WHERE rn = 2)) AS movement
+        FROM ranked
+        GROUP BY product_id
+      )
+      SELECT agg.product_id
+      FROM agg
+      JOIN products p ON p.id = agg.product_id
+      ORDER BY ${sortColSql} ${dirSql} NULLS LAST
       LIMIT ${limit} OFFSET ${offset}
     `);
     const productIds = productIdRows.rows.map((r) => parseInt(String(r.product_id), 10));

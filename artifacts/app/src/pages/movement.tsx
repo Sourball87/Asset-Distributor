@@ -48,8 +48,8 @@ export default function Movement() {
   const [search, setSearch] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
   const [offset, setOffset] = useState(0);
-  const [sortCol, setSortCol] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortCol, setSortCol] = useState<string>("soh");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [activeOnly, setActiveOnly] = useState(true);
 
   const { data: distributors = [] } = useListDistributors();
@@ -65,10 +65,12 @@ export default function Movement() {
       ...(brand ? { brand } : {}),
       ...(search ? { search } : {}),
       activeOnly,
+      sortBy: sortCol as "vpn" | "brand" | "desc" | "soh" | "soo" | "price" | "movement",
+      sortDir,
       limit: PAGE_SIZE,
       offset,
     },
-    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, activeOnly, limit: PAGE_SIZE, offset }) } },
+    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, activeOnly, sortBy: sortCol as "vpn" | "brand" | "desc" | "soh" | "soo" | "price" | "movement", sortDir, limit: PAGE_SIZE, offset }) } },
   );
 
   const cleanup = useCleanupDuplicates({
@@ -101,36 +103,12 @@ export default function Movement() {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortCol(col);
-      setSortDir("asc");
+      setSortDir(col === "soh" || col === "soo" || col === "movement" || col === "price" ? "desc" : "asc");
     }
+    setOffset(0);
   };
 
-  const rawProducts = data?.products ?? [];
-  const products = sortCol
-    ? [...rawProducts].sort((a, b) => {
-        let av: string | number | null = null;
-        let bv: string | number | null = null;
-        if (sortCol === "vpn")         { av = a.vpnDisplay ?? ""; bv = b.vpnDisplay ?? ""; }
-        else if (sortCol === "brand")  { av = a.brand ?? ""; bv = b.brand ?? ""; }
-        else if (sortCol === "desc")   { av = a.description ?? ""; bv = b.description ?? ""; }
-        else if (sortCol === "soh")    { av = a.latestSoh ?? -1; bv = b.latestSoh ?? -1; }
-        else if (sortCol === "soo")    { av = a.latestSoo ?? -1; bv = b.latestSoo ?? -1; }
-        else if (sortCol === "price")  { av = a.latestSellPrice ?? -1; bv = b.latestSellPrice ?? -1; }
-        else if (sortCol === "movement") {
-          av = a.isNew ? Infinity : (a.movement ?? -Infinity);
-          bv = b.isNew ? Infinity : (b.movement ?? -Infinity);
-        }
-        else if (sortCol === "spread") {
-          av = a.priceSpreadFlag ? (a.priceSpreadFlag.maxPrice - a.priceSpreadFlag.minPrice) : -1;
-          bv = b.priceSpreadFlag ? (b.priceSpreadFlag.maxPrice - b.priceSpreadFlag.minPrice) : -1;
-        }
-        if (typeof av === "string" && typeof bv === "string") {
-          return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
-        }
-        const an = av as number, bn = bv as number;
-        return sortDir === "asc" ? an - bn : bn - an;
-      })
-    : rawProducts;
+  const products = data?.products ?? [];
 
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);

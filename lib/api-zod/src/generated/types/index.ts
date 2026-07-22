@@ -32,6 +32,8 @@ export * from './forgotPassword200';
 export * from './forgotPasswordInput';
 export * from './getComparisonParams';
 export * from './getMovementParams';
+export * from './getMovementSortBy';
+export * from './getMovementSortDir';
 export * from './healthStatus';
 export * from './importProfile';
 export * from './importProfileInput';

@@ -424,5 +424,34 @@ offset?: number;
  * When true (default), exclude products with no SOH or SOO in any snapshot within the window
  */
 activeOnly?: boolean;
+/**
+ * Column to sort by (server-side, applied before pagination)
+ */
+sortBy?: GetMovementSortBy;
+/**
+ * Sort direction
+ */
+sortDir?: GetMovementSortDir;
 };
+
+export type GetMovementSortBy = typeof GetMovementSortBy[keyof typeof GetMovementSortBy];
+
+
+export const GetMovementSortBy = {
+  vpn: 'vpn',
+  brand: 'brand',
+  desc: 'desc',
+  soh: 'soh',
+  soo: 'soo',
+  price: 'price',
+  movement: 'movement',
+} as const;
+
+export type GetMovementSortDir = typeof GetMovementSortDir[keyof typeof GetMovementSortDir];
+
+
+export const GetMovementSortDir = {
+  asc: 'asc',
+  desc: 'desc',
+} as const;
 

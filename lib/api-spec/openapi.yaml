@@ -740,6 +740,22 @@ paths:
           schema:
             type: boolean
             default: true
+        - name: sortBy
+          in: query
+          required: false
+          description: Column to sort by (server-side, applied before pagination)
+          schema:
+            type: string
+            enum: [vpn, brand, desc, soh, soo, price, movement]
+            default: soh
+        - name: sortDir
+          in: query
+          required: false
+          description: Sort direction
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
       responses:
         "200":
           description: Movement result

@@ -5,6 +5,8 @@
  * Distributor Pricing & Stock Comparison API
  * OpenAPI spec version: 0.1.0
  */
+import type { GetMovementSortBy } from './getMovementSortBy';
+import type { GetMovementSortDir } from './getMovementSortDir';
 
 export type GetMovementParams = {
 distributorId: number;
@@ -17,4 +19,12 @@ offset?: number;
  * When true (default), exclude products with no SOH or SOO in any snapshot within the window
  */
 activeOnly?: boolean;
+/**
+ * Column to sort by (server-side, applied before pagination)
+ */
+sortBy?: GetMovementSortBy;
+/**
+ * Sort direction
+ */
+sortDir?: GetMovementSortDir;
 };

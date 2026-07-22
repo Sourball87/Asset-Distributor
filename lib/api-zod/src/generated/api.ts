@@ -565,6 +565,8 @@ export const getMovementQueryDaysDefault = 14;
 export const getMovementQueryLimitDefault = 100;
 export const getMovementQueryOffsetDefault = 0;
 export const getMovementQueryActiveOnlyDefault = true;
+export const getMovementQuerySortByDefault = `soh`;
+export const getMovementQuerySortDirDefault = `desc`;
 
 export const GetMovementQueryParams = zod.object({
   "distributorId": zod.coerce.number(),
@@ -573,7 +575,9 @@ export const GetMovementQueryParams = zod.object({
   "search": zod.coerce.string().optional(),
   "limit": zod.coerce.number().default(getMovementQueryLimitDefault),
   "offset": zod.coerce.number().default(getMovementQueryOffsetDefault),
-  "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH or SOO in any snapshot within the window')
+  "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH or SOO in any snapshot within the window'),
+  "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'soo', 'price', 'movement']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
+  "sortDir": zod.enum(['asc', 'desc']).default(getMovementQuerySortDirDefault).describe('Sort direction')
 })
 
 export const GetMovementResponse = zod.object({
