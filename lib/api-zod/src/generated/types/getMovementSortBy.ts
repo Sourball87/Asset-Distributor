@@ -16,5 +16,7 @@ export const GetMovementSortBy = {
   soh: 'soh',
   soo: 'soo',
   price: 'price',
-  movement: 'movement',
+  estUnitsOut: 'estUnitsOut',
+  unitsIn: 'unitsIn',
+  daysOfCover: 'daysOfCover',
 } as const;

@@ -746,8 +746,8 @@ paths:
           description: Column to sort by (server-side, applied before pagination)
           schema:
             type: string
-            enum: [vpn, brand, desc, soh, soo, price, movement]
-            default: soh
+            enum: [vpn, brand, desc, soh, soo, price, estUnitsOut, unitsIn, daysOfCover]
+            default: estUnitsOut
         - name: sortDir
           in: query
           required: false
@@ -1257,7 +1257,7 @@ components:
 
     MovementProduct:
       type: object
-      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, isNew]
+      required: [productId, vpnNormalized, vpnDisplay, brand, description, snapshots, isNew, estUnitsOut, unitsIn, reorderFlag]
       properties:
         productId:
           type: integer
@@ -1279,12 +1279,24 @@ components:
           type: ["integer", "null"]
         latestSellPrice:
           type: ["number", "null"]
-        movement:
-          type: ["integer", "null"]
+        estUnitsOut:
+          type: integer
+          description: Estimated units sold/consumed over the window (classifier total)
+        unitsIn:
+          type: integer
+          description: Units received (deliveries + restocks) over the window
+        reorderFlag:
+          type: boolean
+          description: True if any SOO increase was observed in the window
+        daysOfCover:
+          type: ["number", "null"]
+          description: latestSoh / (estUnitsOut / windowDays); null when estUnitsOut = 0
         movementSinceDate:
           type: ["string", "null"]
+          description: Earliest in-window snapshot date for this product
         isNew:
           type: boolean
+          description: True only if the first-ever snapshot for this distributor is within the window
         priceSpreadFlag:
           oneOf:
             - $ref: "#/components/schemas/PriceSpreadFlag"

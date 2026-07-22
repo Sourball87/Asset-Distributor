@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, stockSnapshotsTable, productsTable, distributorsTable } from "@workspace/db";
 import { eq, and, gte, ilike, inArray, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
+import { classifyMovement } from "../lib/movement-classifier";
 
 const router = Router();
 
@@ -143,10 +144,10 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
   const search     = req.query.search ? String(req.query.search).trim() : null;
   const activeOnly = req.query.activeOnly !== "false";
 
-  const validSortBy  = ["vpn", "brand", "desc", "soh", "soo", "price", "movement"] as const;
+  const validSortBy  = ["vpn", "brand", "desc", "soh", "soo", "price", "estUnitsOut", "unitsIn", "daysOfCover"] as const;
   type SortByCol = typeof validSortBy[number];
-  const sortByRaw    = String(req.query.sortBy ?? "soh");
-  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "soh";
+  const sortByRaw    = String(req.query.sortBy ?? "estUnitsOut");
+  const sortBy: SortByCol = (validSortBy as readonly string[]).includes(sortByRaw) ? sortByRaw as SortByCol : "estUnitsOut";
   const sortDir      = req.query.sortDir === "asc" ? "asc" : "desc";
 
   try {
@@ -167,7 +168,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const cutoffStr = cutoff.toISOString().slice(0, 10);
 
     // Determine inference mode: does the latest snapshot have any nonzero SOO?
-    const sooCheckRows = await db.execute<{ has_soo: string }>(sql`
+    const sooCheckRows = await db.execute<{ has_soo: boolean | string }>(sql`
       SELECT COUNT(*) > 0 AS has_soo
       FROM stock_snapshots
       WHERE distributor_id = ${distId}
@@ -176,8 +177,9 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         )
         AND soo IS NOT NULL AND soo > 0
     `);
+    const hasSoo = sooCheckRows.rows[0]?.has_soo;
     const inferenceMode: "soo_aware" | "soh_only" =
-      sooCheckRows.rows[0]?.has_soo === "true" ? "soo_aware" : "soh_only";
+      hasSoo === true || hasSoo === "true" ? "soo_aware" : "soh_only";
 
     // Data quality: snapshot dates available in the window
     const dqRows = await db.execute<{ cnt: string; min_date: string | null; max_date: string | null }>(sql`
@@ -201,14 +203,18 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const brandCondition  = brand  ? eq(productsTable.brand, brand)                                   : undefined;
     const searchCondition = search ? sql`(${productsTable.vpnNormalized} ILIKE ${"%" + search + "%"} OR ${productsTable.description} ILIKE ${"%" + search + "%"})` : undefined;
 
-    // When activeOnly=true, restrict to products that have at least one snapshot
-    // in the window with SOH > 0 or SOO > 0 (filters out catalogue-only lines).
+    // When activeOnly=true, include products with any stock, any SOO, or any
+    // SOH movement in the window (sold-out-with-recent-movement must appear).
     const activeFilter = activeOnly
       ? sql`AND ss.product_id IN (
-          SELECT DISTINCT product_id FROM stock_snapshots
+          SELECT product_id FROM stock_snapshots
           WHERE distributor_id = ${distId}
             AND snapshot_date >= ${cutoffStr}::date
-            AND (soh > 0 OR soo > 0)
+          GROUP BY product_id
+          HAVING
+            BOOL_OR(soh > 0)
+            OR BOOL_OR(soo > 0)
+            OR MIN(COALESCE(soh, 0)) != MAX(COALESCE(soh, 0))
         )`
       : sql``;
 
@@ -227,23 +233,30 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
 
     // Build sort expression using sql.raw() so column/direction aren't parameterized
     const sortColName =
-      sortBy === "soh"        ? "agg.latest_soh"
-      : sortBy === "soo"      ? "agg.latest_soo"
-      : sortBy === "price"    ? "agg.latest_price"
-      : sortBy === "movement" ? "agg.movement"
-      : sortBy === "vpn"      ? "p.vpn_normalized"
-      : sortBy === "brand"    ? "p.brand"
-      :                         "p.description";
+      sortBy === "soh"          ? "agg.latest_soh"
+      : sortBy === "soo"        ? "agg.latest_soo"
+      : sortBy === "price"      ? "agg.latest_price"
+      : sortBy === "estUnitsOut" ? "agg.est_units_out"
+      : sortBy === "unitsIn"    ? "agg.units_in"
+      : sortBy === "daysOfCover" ? "agg.days_of_cover"
+      : sortBy === "vpn"        ? "p.vpn_normalized"
+      : sortBy === "brand"      ? "p.brand"
+      :                           "p.description";
     const orderByClause = sql.raw(`${sortColName} ${sortDir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
 
-    // Paginated product list — CTE computes latest/prev snapshot values then sorts
+    // Paginated product list — CTE walks all consecutive snapshot pairs to compute
+    // classifier metrics (estUnitsOut, unitsIn, reorderFlag, daysOfCover) then
+    // sorts before pagination so page 1 always returns the correct top-N rows.
     const productIdRows = await db.execute<{ product_id: string }>(sql`
-      WITH ranked AS (
+      WITH ordered AS (
         SELECT
           ss.product_id,
           ss.soh,
           ss.soo,
           ss.sell_price,
+          ss.snapshot_date,
+          LAG(ss.soh) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soh,
+          LAG(ss.soo) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soo,
           ROW_NUMBER() OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date DESC) AS rn
         FROM stock_snapshots ss
         JOIN products p ON p.id = ss.product_id
@@ -259,8 +272,45 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           MAX(soh)        FILTER (WHERE rn = 1) AS latest_soh,
           MAX(soo)        FILTER (WHERE rn = 1) AS latest_soo,
           MAX(sell_price) FILTER (WHERE rn = 1) AS latest_price,
-          (MAX(soh) FILTER (WHERE rn = 1)) - (MAX(soh) FILTER (WHERE rn = 2)) AS movement
-        FROM ranked
+          COALESCE(SUM(
+            CASE
+              WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
+              WHEN soh - prev_soh > 0
+                AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
+                THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
+              ELSE 0
+            END
+          ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) AS est_units_out,
+          COALESCE(SUM(
+            CASE WHEN soh - prev_soh > 0 THEN soh - prev_soh ELSE 0 END
+          ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) AS units_in,
+          BOOL_OR(
+            (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) > 0
+          ) FILTER (WHERE prev_soh IS NOT NULL) AS reorder_flag,
+          CASE
+            WHEN COALESCE(SUM(
+              CASE
+                WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
+                WHEN soh - prev_soh > 0
+                  AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
+                  THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
+                ELSE 0
+              END
+            ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0) > 0
+            THEN (MAX(soh) FILTER (WHERE rn = 1))::float
+                 / (COALESCE(SUM(
+                      CASE
+                        WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
+                        WHEN soh - prev_soh > 0
+                          AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
+                          THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
+                        ELSE 0
+                      END
+                    ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)::float
+                    / ${sql.raw(String(days))})
+            ELSE NULL
+          END AS days_of_cover
+        FROM ordered
         GROUP BY product_id
       )
       SELECT agg.product_id
@@ -319,7 +369,20 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       ORDER BY ss.product_id, ss.snapshot_date ASC
     `);
 
-    // Group by product and compute movement
+    // First-ever snapshot date per product (across ALL dates, not just window)
+    // Used for the correct isNew definition.
+    const firstDateRows = await db.execute<{ product_id: string; first_date: string }>(sql`
+      SELECT product_id, MIN(snapshot_date) AS first_date
+      FROM stock_snapshots
+      WHERE distributor_id = ${distId}
+        AND product_id = ANY(${sql`ARRAY[${sql.join(productIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})
+      GROUP BY product_id
+    `);
+    const firstDates = new Map(
+      firstDateRows.rows.map((r) => [parseInt(String(r.product_id), 10), r.first_date]),
+    );
+
+    // Group snapshots by product
     const byProduct = new Map<number, SnapshotRow[]>();
     for (const row of snapshotRows.rows) {
       const pid = parseInt(String(row.product_id), 10);
@@ -328,48 +391,71 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       else byProduct.set(pid, [row]);
     }
 
-    const products = [...byProduct.entries()].map(([, snaps]) => {
-      const sorted  = snaps; // already ASC from DB
-      const latest  = sorted[sorted.length - 1]!;
-      const previous = sorted.length > 1 ? sorted[sorted.length - 2]! : null;
+    // FIX 1: iterate productIds in server-sort order so the JSON response
+    // preserves the sort the CTE computed (Map iteration order is insertion
+    // order, which is snapshot row order — not the sorted product order).
+    const products = productIds
+      .filter((pid) => byProduct.has(pid))
+      .map((pid) => {
+        const snaps = byProduct.get(pid)!;
+        const sorted  = snaps; // already ASC from DB
+        const latest  = sorted[sorted.length - 1]!;
 
-      const latestSoh  = latest.soh  != null ? parseInt(String(latest.soh),  10) : null;
-      const latestSoo  = latest.soo  != null ? parseInt(String(latest.soo),  10) : null;
-      const prevSoh    = previous?.soh != null ? parseInt(String(previous.soh), 10) : null;
-      const latestSell = latest.sell_price     != null ? parseFloat(latest.sell_price) : null;
+        const latestSoh  = latest.soh  != null ? parseInt(String(latest.soh),  10) : null;
+        const latestSoo  = latest.soo  != null ? parseInt(String(latest.soo),  10) : null;
+        const latestSell = latest.sell_price != null ? parseFloat(latest.sell_price) : null;
 
-      const movement       = latestSoh != null && prevSoh != null ? latestSoh - prevSoh : null;
-      const movementSince  = previous?.snapshot_date ?? null;
-      const isNew          = sorted.length === 1;
+        // Earliest in-window snapshot date (for movementSinceDate)
+        const movementSinceDate = sorted[0]?.snapshot_date ?? null;
 
-      // Price spread flag: from the latest snapshot's persisted sell_price_max
-      const priceSpreadFlag =
-        latest.sell_price_max != null && latest.sell_price != null
-          ? {
-              minPrice: parseFloat(latest.sell_price),
-              maxPrice: parseFloat(latest.sell_price_max),
-            }
-          : null;
+        // isNew: true only if the first-ever snapshot for this distributor
+        // falls inside the current look-back window.
+        const firstDate = firstDates.get(pid) ?? cutoffStr;
+        const isNew = firstDate >= cutoffStr;
 
-      return {
-        productId:        parseInt(String(latest.product_id), 10),
-        vpnNormalized:    latest.vpn_normalized,
-        vpnDisplay:       latest.vpn_display,
-        brand:            latest.brand,
-        description:      latest.description,
-        snapshots:        sorted.map((s) => ({
-          snapshotDate: s.snapshot_date,
-          soh:          s.soh  != null ? parseInt(String(s.soh),  10) : null,
-          soo:          s.soo  != null ? parseInt(String(s.soo),  10) : null,
-          sellPrice:    s.sell_price != null ? parseFloat(s.sell_price) : null,
-        })),
-        latestSoh,
-        latestSoo,
-        latestSellPrice: latestSell,
-        movement,
-        movementSinceDate: movementSince,
-        isNew,
-        priceSpreadFlag,
+        // FIX 3: walk all consecutive pairs with the full classifier
+        const classifierInput = sorted.map((s) => ({
+          soh: s.soh != null ? parseInt(String(s.soh), 10) : null,
+          soo: s.soo != null ? parseInt(String(s.soo), 10) : null,
+        }));
+        const { estUnitsOut, unitsIn, reorderFlag } = classifyMovement(classifierInput);
+
+        const daysOfCover =
+          estUnitsOut > 0 && latestSoh != null
+            ? latestSoh / (estUnitsOut / days)
+            : null;
+
+        // Price spread flag: from the latest snapshot's persisted sell_price_max
+        const priceSpreadFlag =
+          latest.sell_price_max != null && latest.sell_price != null
+            ? {
+                minPrice: parseFloat(latest.sell_price),
+                maxPrice: parseFloat(latest.sell_price_max),
+              }
+            : null;
+
+        return {
+          productId:        pid,
+          vpnNormalized:    latest.vpn_normalized,
+          vpnDisplay:       latest.vpn_display,
+          brand:            latest.brand,
+          description:      latest.description,
+          snapshots:        sorted.map((s) => ({
+            snapshotDate: s.snapshot_date,
+            soh:          s.soh  != null ? parseInt(String(s.soh),  10) : null,
+            soo:          s.soo  != null ? parseInt(String(s.soo),  10) : null,
+            sellPrice:    s.sell_price != null ? parseFloat(s.sell_price) : null,
+          })),
+          latestSoh,
+          latestSoo,
+          latestSellPrice: latestSell,
+          estUnitsOut,
+          unitsIn,
+          reorderFlag,
+          daysOfCover,
+          movementSinceDate,
+          isNew,
+          priceSpreadFlag,
       };
     });
 

@@ -350,10 +350,23 @@ export interface MovementProduct {
   latestSoo?: number | null;
   /** @nullable */
   latestSellPrice?: number | null;
-  /** @nullable */
-  movement?: number | null;
-  /** @nullable */
+  /** Estimated units sold/consumed over the window (classifier total) */
+  estUnitsOut: number;
+  /** Units received (deliveries + restocks) over the window */
+  unitsIn: number;
+  /** True if any SOO increase was observed in the window */
+  reorderFlag: boolean;
+  /**
+     * latestSoh / (estUnitsOut / windowDays); null when estUnitsOut = 0
+     * @nullable
+     */
+  daysOfCover?: number | null;
+  /**
+     * Earliest in-window snapshot date for this product
+     * @nullable
+     */
   movementSinceDate?: string | null;
+  /** True only if the first-ever snapshot for this distributor is within the window */
   isNew: boolean;
   priceSpreadFlag?: PriceSpreadFlag | null;
 }
@@ -444,7 +457,9 @@ export const GetMovementSortBy = {
   soh: 'soh',
   soo: 'soo',
   price: 'price',
-  movement: 'movement',
+  estUnitsOut: 'estUnitsOut',
+  unitsIn: 'unitsIn',
+  daysOfCover: 'daysOfCover',
 } as const;
 
 export type GetMovementSortDir = typeof GetMovementSortDir[keyof typeof GetMovementSortDir];

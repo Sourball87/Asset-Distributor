@@ -1,0 +1,24 @@
+Three defects in the movement feature. Fix in this order.
+
+FIX 1 — SORT ORDER DISCARDED (experimental.ts)
+The paginated productIds are computed in the requested sort order, but the response is built by iterating a Map keyed by product_id, losing that order. Build the products array by iterating productIds in order (skipping ids with no snapshot rows), not byProduct.entries(). Verify: sortBy=soh&sortDir=desc returns strictly descending latest_soh in the JSON.
+
+FIX 2 — SOLD-OUT PRODUCTS HIDDEN (experimental.ts + movement.tsx)
+Change the activeOnly filter criterion from "any in-window snapshot with soh>0 OR soo>0" to also include any product whose SOH changed within the window (movement signal), so sold-out SKUs remain visible. Rename the UI toggle to "Hide inactive lines" with tooltip "Hides products with zero stock, zero on-order, and no movement in the window." Sold-out-with-recent-movement must appear.
+
+FIX 3 — IMPLEMENT THE SPECCED CLASSIFIER (experimental.ts, replaces the single-interval diff)
+Per product, walk ALL consecutive snapshot pairs in the window and classify each interval:
+  soh_d = soh - prev_soh; soo_d = (soo??0) - (prev_soo??0)
+  - soh_d < 0 → outgoing: est_out += -soh_d
+  - soh_d > 0 AND soo_d < 0 → delivery: est_out += max(0, -soo_d - soh_d); units_in += soh_d
+  - soh_d > 0 AND soo_d >= 0 → restock: units_in += soh_d
+  - soo_d > 0 → reorder_flag = true (independent of the above)
+Response per product REPLACES movement with: estUnitsOut (window total), unitsIn, reorderFlag, daysOfCover (latestSoh / (estUnitsOut / window days), null if estUnitsOut = 0), plus keep the snapshots series. Keep movementSinceDate as the earliest in-window snapshot date. In soh_only mode (distributor has no SOO) the same walk runs with soo treated as 0 — document that estUnitsOut is then a pure SOH-decline floor.
+Fix inferenceMode detection: compare the has_soo result as a boolean, not the string "true".
+Fix isNew: only true if the product's FIRST-EVER snapshot for this distributor (not just first in window) is inside the window — one cheap MIN(snapshot_date) lookup per page of products.
+
+FRONTEND (movement.tsx): columns become SOH, SOO, Est. units out, Units in, Days cover, Reorder (badge), sparkline unchanged. Default sort: estUnitsOut DESC. Keep the hot-SKU row highlight: estUnitsOut > 0 AND reorderFlag. Red/green semantics: est units out is neutral/red (demand), units in is muted — a big delivery must NOT render as positive green "movement".
+
+TESTS: unit-test the classifier with the four interval types plus a masked-sales case (soh +40, soo -100 → est_out 60, units_in 40). e2e: sort order asserted on two columns; a sold-out product (soh 50→0→0 in window) appears with estUnitsOut 50.
+
+VERIFY IN PRODUCTION: hand-check 13B9005EAU (should show estUnitsOut ≈ 2,007 for the July 8–20 window) and 13HR002FAU (sell-out → reorder flag → delivery with masked-sales estimate). Report both traces. Update openapi.yaml + regenerate hooks. Deploy = republish, and confirm the published app serves the new response shape.

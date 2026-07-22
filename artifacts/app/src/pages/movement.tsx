@@ -38,6 +38,9 @@ function fmtPrice(n: number | null | undefined): string {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+type SortCol = "vpn" | "brand" | "desc" | "soh" | "soo" | "price" | "estUnitsOut" | "unitsIn" | "daysOfCover";
+const NUM_COLS: SortCol[] = ["soh", "soo", "price", "estUnitsOut", "unitsIn", "daysOfCover"];
+
 export default function Movement() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -48,7 +51,7 @@ export default function Movement() {
   const [search, setSearch] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
   const [offset, setOffset] = useState(0);
-  const [sortCol, setSortCol] = useState<string>("soh");
+  const [sortCol, setSortCol] = useState<SortCol>("estUnitsOut");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [activeOnly, setActiveOnly] = useState(true);
 
@@ -65,12 +68,12 @@ export default function Movement() {
       ...(brand ? { brand } : {}),
       ...(search ? { search } : {}),
       activeOnly,
-      sortBy: sortCol as "vpn" | "brand" | "desc" | "soh" | "soo" | "price" | "movement",
+      sortBy: sortCol,
       sortDir,
       limit: PAGE_SIZE,
       offset,
     },
-    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, activeOnly, sortBy: sortCol as "vpn" | "brand" | "desc" | "soh" | "soo" | "price" | "movement", sortDir, limit: PAGE_SIZE, offset }) } },
+    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, activeOnly, sortBy: sortCol, sortDir, limit: PAGE_SIZE, offset }) } },
   );
 
   const cleanup = useCleanupDuplicates({
@@ -98,22 +101,33 @@ export default function Movement() {
     setOffset(0);
   };
 
-  const handleSort = (col: string) => {
+  const handleSort = (col: SortCol) => {
     if (sortCol === col) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortCol(col);
-      setSortDir(col === "soh" || col === "soo" || col === "movement" || col === "price" ? "desc" : "asc");
+      setSortDir(NUM_COLS.includes(col) ? "desc" : "asc");
     }
     setOffset(0);
   };
 
   const products = data?.products ?? [];
-
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
   const showSoo = data?.inferenceMode === "soo_aware";
+
+  const colDefs: { key: SortCol; label: string; right?: boolean; width?: string }[] = [
+    { key: "vpn",         label: "VPN",           width: "w-36" },
+    { key: "brand",       label: "Brand",          width: "w-24" },
+    { key: "desc",        label: "Description" },
+    { key: "soh",         label: "SOH",            right: true, width: "w-20" },
+    ...(showSoo ? [{ key: "soo" as SortCol, label: "SOO", right: true, width: "w-20" }] : []),
+    { key: "estUnitsOut", label: "Est. units out", right: true, width: "w-28" },
+    { key: "unitsIn",     label: "Units in",       right: true, width: "w-24" },
+    { key: "daysOfCover", label: "Days cover",     right: true, width: "w-24" },
+    { key: "price",       label: "Price",          right: true, width: "w-24" },
+  ];
 
   return (
     <div className="space-y-4">
@@ -121,7 +135,7 @@ export default function Movement() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-semibold text-foreground">Stock Movement</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">SOH delta per distributor over a look-back window</p>
+          <p className="text-xs text-muted-foreground mt-0.5">SOH classifier per distributor over a look-back window</p>
         </div>
         <Button
           variant="outline"
@@ -188,9 +202,10 @@ export default function Movement() {
 
         <button
           onClick={() => { setActiveOnly((v) => !v); setOffset(0); }}
+          title="Hides products with zero stock, zero on-order, and no movement in the window."
           className={`h-7 px-2.5 rounded-sm border text-xs transition-colors select-none ${activeOnly ? "bg-secondary text-secondary-foreground border-border font-medium" : "text-muted-foreground border-border hover:bg-secondary/50"}`}
         >
-          Active stock only
+          Hide inactive lines
         </button>
       </div>
 
@@ -221,7 +236,7 @@ export default function Movement() {
         </div>
       )}
 
-      {enabled && isError && (
+      {isError && (
         <div className="border rounded-sm bg-card p-8 flex items-center justify-center gap-2 text-sm text-destructive">
           <AlertCircle className="h-4 w-4" /> Failed to load movement data.
         </div>
@@ -244,59 +259,65 @@ export default function Movement() {
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="border-b border-border bg-muted/50">
-                {(["vpn","brand","desc","soh",showSoo?"soo":null,"price","movement","spread"] as (string|null)[])
-                  .filter(Boolean)
-                  .map((col) => {
-                    const right = ["soh","soo","price","movement","spread"].includes(col!);
-                    const labels: Record<string,string> = { vpn:"VPN", brand:"Brand", desc:"Description", soh:"SOH", soo:"SOO", price:"Price", movement:"Movement", spread:"Price spread" };
-                    const active = sortCol === col;
-                    const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
-                    return (
-                      <th
-                        key={col}
-                        onClick={() => handleSort(col!)}
-                        className={`px-3 py-2 font-semibold text-muted-foreground select-none cursor-pointer hover:text-foreground transition-colors ${right ? "text-right" : "text-left"} ${col === "vpn" ? "w-32" : col === "brand" ? "w-24" : col === "soh" || col === "soo" ? "w-20" : col === "price" ? "w-24" : col === "movement" || col === "spread" ? "w-32" : ""} ${active ? "text-foreground" : ""}`}
-                      >
-                        <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
-                          {labels[col!]}
-                          <Icon className="h-3 w-3 shrink-0" />
-                        </span>
-                      </th>
-                    );
-                  })}
+                {colDefs.map(({ key, label, right, width }) => {
+                  const active = sortCol === key;
+                  const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
+                  return (
+                    <th
+                      key={key}
+                      onClick={() => handleSort(key)}
+                      className={`px-3 py-2 font-semibold text-muted-foreground select-none cursor-pointer hover:text-foreground transition-colors ${right ? "text-right" : "text-left"} ${width ?? ""} ${active ? "text-foreground" : ""}`}
+                    >
+                      <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
+                        {label}
+                        <Icon className="h-3 w-3 shrink-0" />
+                      </span>
+                    </th>
+                  );
+                })}
+                <th className="px-3 py-2 font-semibold text-muted-foreground text-right w-20">Reorder</th>
+                <th className="px-3 py-2 font-semibold text-muted-foreground text-right w-32">Price spread</th>
               </tr>
             </thead>
             <tbody>
               {products.map((p, i) => {
                 const isEven = i % 2 === 0;
-                const movColor =
-                  p.isNew ? "text-blue-600 dark:text-blue-400"
-                  : p.movement == null ? "text-muted-foreground"
-                  : p.movement > 0 ? "text-green-700 dark:text-green-400"
-                  : p.movement < 0 ? "text-red-600 dark:text-red-400"
-                  : "text-muted-foreground";
-
-                const movLabel =
-                  p.isNew ? "NEW"
-                  : p.movement == null ? "—"
-                  : p.movement > 0 ? `+${fmt(p.movement)}`
-                  : fmt(p.movement);
-
-                const movSince = !p.isNew && p.movementSinceDate
-                  ? `since ${fmtDate(p.movementSinceDate)}`
-                  : "";
+                const isHot = p.estUnitsOut > 0 && p.reorderFlag;
 
                 return (
-                  <tr key={p.productId} className={`border-b border-border last:border-0 ${isEven ? "" : "bg-muted/25"}`}>
+                  <tr
+                    key={p.productId}
+                    className={`border-b border-border last:border-0 ${isHot ? "bg-amber-50 dark:bg-amber-950/20" : isEven ? "" : "bg-muted/25"}`}
+                  >
                     <td className="px-3 py-1.5 font-mono text-foreground">{p.vpnDisplay}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{p.brand}</td>
                     <td className="px-3 py-1.5 text-muted-foreground max-w-xs truncate">{p.description}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{fmt(p.latestSoh)}</td>
                     {showSoo && <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{fmt(p.latestSoo)}</td>}
+                    <td className="px-3 py-1.5 text-right font-mono">
+                      {p.isNew ? (
+                        <span className="text-blue-600 dark:text-blue-400">NEW</span>
+                      ) : p.estUnitsOut > 0 ? (
+                        <span className="text-muted-foreground">{fmt(p.estUnitsOut)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                      {p.unitsIn > 0 ? fmt(p.unitsIn) : <span>—</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                      {p.daysOfCover != null ? fmt(p.daysOfCover, 1) : <span>—</span>}
+                    </td>
                     <td className="px-3 py-1.5 text-right font-mono">{fmtPrice(p.latestSellPrice)}</td>
-                    <td className={`px-3 py-1.5 text-right font-mono ${movColor}`}>
-                      <span className="font-medium">{movLabel}</span>
-                      {movSince && <span className="block text-[10px] font-sans text-muted-foreground">{movSince}</span>}
+                    <td className="px-3 py-1.5 text-right">
+                      {p.reorderFlag ? (
+                        <Badge variant="outline" className="text-[10px] h-4 border-amber-500 text-amber-600 dark:text-amber-400">
+                          REORDER
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground font-mono">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono">
                       {p.priceSpreadFlag ? (
