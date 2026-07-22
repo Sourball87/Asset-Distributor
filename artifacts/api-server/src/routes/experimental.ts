@@ -255,8 +255,12 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         )`
       : sql``;
 
-    // estUnitsSold SQL formula — mirrors classifyMovement() exactly
-    const estUnitsSoldExpr = sql.raw(`COALESCE(SUM(
+    // estUnitsSold SQL formula — mirrors classifyMovement() exactly.
+    // Defined as a plain string so it can be safely embedded into both the
+    // SELECT expression (via sql.raw) and the soldOutOnly HAVING clause string
+    // without using queryChunks, which are internal Drizzle objects and produce
+    // invalid SQL when joined.
+    const EST_UNITS_SOLD_SQL = `COALESCE(SUM(
       CASE
         WHEN soh - prev_soh < 0 THEN -(soh - prev_soh)
         WHEN soh - prev_soh > 0
@@ -264,11 +268,13 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
         ELSE 0
       END
-    ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)`);
+    ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)`;
+
+    const estUnitsSoldExpr = sql.raw(EST_UNITS_SOLD_SQL);
 
     // soldOutOnly post-aggregation HAVING condition
     const soldOutHaving = soldOutOnly
-      ? sql.raw(`AND MAX(soh) FILTER (WHERE rn = 1) = 0 AND ${estUnitsSoldExpr.queryChunks.join("")} > 0`)
+      ? sql.raw(`AND MAX(soh) FILTER (WHERE rn = 1) = 0 AND ${EST_UNITS_SOLD_SQL} > 0`)
       : sql``;
 
     // notCarriedByDicker post-aggregation WHERE condition
