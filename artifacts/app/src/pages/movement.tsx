@@ -50,6 +50,7 @@ export default function Movement() {
   const [offset, setOffset] = useState(0);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [activeOnly, setActiveOnly] = useState(true);
 
   const { data: distributors = [] } = useListDistributors();
   const { data: brands = [] } = useListBrands();
@@ -63,10 +64,11 @@ export default function Movement() {
       days: parseInt(days, 10),
       ...(brand ? { brand } : {}),
       ...(search ? { search } : {}),
+      activeOnly,
       limit: PAGE_SIZE,
       offset,
     },
-    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, limit: PAGE_SIZE, offset }) } },
+    { query: { enabled, queryKey: getGetMovementQueryKey({ distributorId: distIdNum!, days: parseInt(days, 10), brand: brand || undefined, search: search || undefined, activeOnly, limit: PAGE_SIZE, offset }) } },
   );
 
   const cleanup = useCleanupDuplicates({
@@ -205,6 +207,13 @@ export default function Movement() {
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setSearch(""); setSearchInput(""); setOffset(0); }}>Clear</Button>
           )}
         </div>
+
+        <button
+          onClick={() => { setActiveOnly((v) => !v); setOffset(0); }}
+          className={`h-7 px-2.5 rounded-sm border text-xs transition-colors select-none ${activeOnly ? "bg-secondary text-secondary-foreground border-border font-medium" : "text-muted-foreground border-border hover:bg-secondary/50"}`}
+        >
+          Active stock only
+        </button>
       </div>
 
       {/* Data quality / inference mode strip */}

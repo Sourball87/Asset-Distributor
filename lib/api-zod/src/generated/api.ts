@@ -564,6 +564,7 @@ export const CleanupDuplicatesResponse = zod.object({
 export const getMovementQueryDaysDefault = 14;
 export const getMovementQueryLimitDefault = 100;
 export const getMovementQueryOffsetDefault = 0;
+export const getMovementQueryActiveOnlyDefault = true;
 
 export const GetMovementQueryParams = zod.object({
   "distributorId": zod.coerce.number(),
@@ -571,7 +572,8 @@ export const GetMovementQueryParams = zod.object({
   "brand": zod.coerce.string().optional(),
   "search": zod.coerce.string().optional(),
   "limit": zod.coerce.number().default(getMovementQueryLimitDefault),
-  "offset": zod.coerce.number().default(getMovementQueryOffsetDefault)
+  "offset": zod.coerce.number().default(getMovementQueryOffsetDefault),
+  "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH or SOO in any snapshot within the window')
 })
 
 export const GetMovementResponse = zod.object({

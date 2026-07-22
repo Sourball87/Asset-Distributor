@@ -733,6 +733,13 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: activeOnly
+          in: query
+          required: false
+          description: When true (default), exclude products with no SOH or SOO in any snapshot within the window
+          schema:
+            type: boolean
+            default: true
       responses:
         "200":
           description: Movement result

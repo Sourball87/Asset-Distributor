@@ -13,4 +13,8 @@ brand?: string;
 search?: string;
 limit?: number;
 offset?: number;
+/**
+ * When true (default), exclude products with no SOH or SOO in any snapshot within the window
+ */
+activeOnly?: boolean;
 };

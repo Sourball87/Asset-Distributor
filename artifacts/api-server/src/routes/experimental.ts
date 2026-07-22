@@ -136,11 +136,12 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     return;
   }
 
-  const days   = Math.max(1, parseInt(String(req.query.days   ?? "14"), 10) || 14);
-  const limit  = Math.min(500, Math.max(1, parseInt(String(req.query.limit  ?? "100"), 10) || 100));
-  const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"),  10) || 0);
-  const brand  = req.query.brand  ? String(req.query.brand).trim()  : null;
-  const search = req.query.search ? String(req.query.search).trim() : null;
+  const days       = Math.max(1, parseInt(String(req.query.days   ?? "14"), 10) || 14);
+  const limit      = Math.min(500, Math.max(1, parseInt(String(req.query.limit  ?? "100"), 10) || 100));
+  const offset     = Math.max(0, parseInt(String(req.query.offset ?? "0"),  10) || 0);
+  const brand      = req.query.brand  ? String(req.query.brand).trim()  : null;
+  const search     = req.query.search ? String(req.query.search).trim() : null;
+  const activeOnly = req.query.activeOnly !== "false";
 
   try {
     // Resolve distributor name
@@ -194,6 +195,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const brandCondition  = brand  ? eq(productsTable.brand, brand)                                   : undefined;
     const searchCondition = search ? sql`(${productsTable.vpnNormalized} ILIKE ${"%" + search + "%"} OR ${productsTable.description} ILIKE ${"%" + search + "%"})` : undefined;
 
+    // When activeOnly=true, restrict to products that have at least one snapshot
+    // in the window with SOH > 0 or SOO > 0 (filters out catalogue-only lines).
+    const activeFilter = activeOnly
+      ? sql`AND ss.product_id IN (
+          SELECT DISTINCT product_id FROM stock_snapshots
+          WHERE distributor_id = ${distId}
+            AND snapshot_date >= ${cutoffStr}::date
+            AND (soh > 0 OR soo > 0)
+        )`
+      : sql``;
+
     // Distinct product IDs that have snapshots in window (for total count)
     const countRows = await db.execute<{ total: string }>(sql`
       SELECT COUNT(DISTINCT ss.product_id) AS total
@@ -201,6 +213,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       JOIN products p ON p.id = ss.product_id
       WHERE ss.distributor_id = ${distId}
         AND ss.snapshot_date >= ${cutoffStr}::date
+        ${activeFilter}
         ${brand  ? sql`AND p.brand = ${brand}` : sql``}
         ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
     `);
@@ -213,6 +226,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       JOIN products p ON p.id = ss.product_id
       WHERE ss.distributor_id = ${distId}
         AND ss.snapshot_date >= ${cutoffStr}::date
+        ${activeFilter}
         ${brand  ? sql`AND p.brand = ${brand}` : sql``}
         ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ORDER BY ss.product_id
