@@ -155,7 +155,7 @@ async function getCandidates(opts: {
     CASE
       WHEN latest.sku_type IS NOT NULL AND latest.sku_type != ''
       THEN latest.sku_type = 'BundledItem'
-      ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+      ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
     END,
     FALSE
   )`);

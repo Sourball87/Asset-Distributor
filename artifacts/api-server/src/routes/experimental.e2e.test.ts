@@ -70,10 +70,13 @@ describe("Bundle filter SQL – NULL-safety (Ingram-shaped fixture)", () => {
   //     CASE
   //       WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
   //       THEN ss.sku_type = 'BundledItem'
-  //       ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+  //       ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
   //     END,
   //     FALSE                  ← NULL-safe fallback: treat null vpn_display as non-bundle
   //   )
+  //
+  // Bare underscore is intentionally NOT a signal: Dell BST*/BTO* codes use underscores
+  // as standard part-number formatting and are regular stocked products.
 
   it("null sku_type + non-bundle VPN counts are identical with/without COALESCE guard", async () => {
     // Count Ingram non-bundle products (null sku_type, heuristic-negative vpn_display).
@@ -85,7 +88,7 @@ describe("Bundle filter SQL – NULL-safety (Ingram-shaped fixture)", () => {
       JOIN distributors d ON d.id = ss.distributor_id
       WHERE d.name ILIKE '%ingram%'
         AND ss.sku_type IS NULL
-        AND NOT (p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0)
+        AND NOT (p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%')
     `);
     const expectedCount = parseInt(String(baseline.rows[0]?.cnt ?? "0"), 10);
     expect(expectedCount).toBeGreaterThan(0); // sanity: such products exist
@@ -103,7 +106,7 @@ describe("Bundle filter SQL – NULL-safety (Ingram-shaped fixture)", () => {
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
-            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+            ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
           END,
           FALSE
         )
@@ -128,7 +131,7 @@ describe("Bundle filter SQL – NULL-safety (Ingram-shaped fixture)", () => {
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
-            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+            ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
           END
         ) IS NULL
     `);

@@ -217,8 +217,9 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
 
     // Bundle/CTO exclusion count (always computed so PMs can sanity-check).
     // Primary signal: ss.sku_type = 'BundledItem' when the feed populates it (e.g. Dicker Data).
-    // Fallback heuristic: vpn_display starts with 'CTO' OR contains a literal '_'.
-    // STRPOS is used instead of LIKE because '_' is a wildcard in LIKE patterns.
+    // Fallback heuristic when sku_type is null: vpn_display starts with 'CTO' OR contains '+'.
+    // Bare underscore is NOT a bundle signal — Dell build-to-stock/order codes (BST*/BTO*) use
+    // underscores as standard formatting and are regular stocked products.
     const bundleCountRows = await db.execute<{ excluded: string }>(sql`
       SELECT COUNT(DISTINCT ss.product_id) AS excluded
       FROM stock_snapshots ss
@@ -229,7 +230,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
-            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+            ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
           END,
           FALSE
         )
@@ -247,7 +248,9 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     // Bundle/CTO exclusion filter.
     // Primary signal: ss.sku_type = 'BundledItem' (populated by Dicker Data and any future
     // distributor whose feed carries it). Fallback heuristic when sku_type is null: vpn_display
-    // starts with 'CTO' OR contains a literal '_' (STRPOS, not LIKE, to avoid wildcard treatment).
+    // starts with 'CTO' OR contains '+' (service-attach or multi-SKU bundle separator).
+    // Bare underscore is NOT a signal — Dell BST*/BTO* codes use underscores as standard
+    // formatting and are regular stocked products, not bundles.
     // COALESCE(…, FALSE) makes the expression NULL-safe: if vpn_display is ever null
     // (and sku_type is also null), the ELSE branch would yield NULL, making NOT NULL = NULL
     // which silently drops the row from WHERE. COALESCE treats that as FALSE → row included.
@@ -256,7 +259,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           CASE
             WHEN ss.sku_type IS NOT NULL AND ss.sku_type != ''
             THEN ss.sku_type = 'BundledItem'
-            ELSE p.vpn_display ILIKE 'CTO%' OR STRPOS(p.vpn_display, '_') > 0
+            ELSE p.vpn_display ILIKE 'CTO%' OR p.vpn_display LIKE '%+%'
           END,
           FALSE
         )`
