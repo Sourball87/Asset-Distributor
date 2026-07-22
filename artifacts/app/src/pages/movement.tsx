@@ -17,7 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertCircle, ChevronLeft, ChevronRight, Wrench } from "lucide-react";
+import { Loader2, AlertCircle, ChevronLeft, ChevronRight, Wrench, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const PAGE_SIZE = 100;
@@ -48,6 +48,8 @@ export default function Movement() {
   const [search, setSearch] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
   const [offset, setOffset] = useState(0);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const { data: distributors = [] } = useListDistributors();
   const { data: brands = [] } = useListBrands();
@@ -92,7 +94,42 @@ export default function Movement() {
     setOffset(0);
   };
 
-  const products = data?.products ?? [];
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
+
+  const rawProducts = data?.products ?? [];
+  const products = sortCol
+    ? [...rawProducts].sort((a, b) => {
+        let av: string | number | null = null;
+        let bv: string | number | null = null;
+        if (sortCol === "vpn")         { av = a.vpnDisplay ?? ""; bv = b.vpnDisplay ?? ""; }
+        else if (sortCol === "brand")  { av = a.brand ?? ""; bv = b.brand ?? ""; }
+        else if (sortCol === "desc")   { av = a.description ?? ""; bv = b.description ?? ""; }
+        else if (sortCol === "soh")    { av = a.latestSoh ?? -1; bv = b.latestSoh ?? -1; }
+        else if (sortCol === "soo")    { av = a.latestSoo ?? -1; bv = b.latestSoo ?? -1; }
+        else if (sortCol === "price")  { av = a.latestSellPrice ?? -1; bv = b.latestSellPrice ?? -1; }
+        else if (sortCol === "movement") {
+          av = a.isNew ? Infinity : (a.movement ?? -Infinity);
+          bv = b.isNew ? Infinity : (b.movement ?? -Infinity);
+        }
+        else if (sortCol === "spread") {
+          av = a.priceSpreadFlag ? (a.priceSpreadFlag.maxPrice - a.priceSpreadFlag.minPrice) : -1;
+          bv = b.priceSpreadFlag ? (b.priceSpreadFlag.maxPrice - b.priceSpreadFlag.minPrice) : -1;
+        }
+        if (typeof av === "string" && typeof bv === "string") {
+          return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+        }
+        const an = av as number, bn = bv as number;
+        return sortDir === "asc" ? an - bn : bn - an;
+      })
+    : rawProducts;
+
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
@@ -215,14 +252,26 @@ export default function Movement() {
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="border-b border-border bg-muted/50">
-                <th className="text-left px-3 py-2 font-semibold text-muted-foreground w-32">VPN</th>
-                <th className="text-left px-3 py-2 font-semibold text-muted-foreground w-24">Brand</th>
-                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Description</th>
-                <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-20">SOH</th>
-                {showSoo && <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-20">SOO</th>}
-                <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-24">Price</th>
-                <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-32">Movement</th>
-                <th className="text-right px-3 py-2 font-semibold text-muted-foreground w-32">Price spread</th>
+                {(["vpn","brand","desc","soh",showSoo?"soo":null,"price","movement","spread"] as (string|null)[])
+                  .filter(Boolean)
+                  .map((col) => {
+                    const right = ["soh","soo","price","movement","spread"].includes(col!);
+                    const labels: Record<string,string> = { vpn:"VPN", brand:"Brand", desc:"Description", soh:"SOH", soo:"SOO", price:"Price", movement:"Movement", spread:"Price spread" };
+                    const active = sortCol === col;
+                    const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
+                    return (
+                      <th
+                        key={col}
+                        onClick={() => handleSort(col!)}
+                        className={`px-3 py-2 font-semibold text-muted-foreground select-none cursor-pointer hover:text-foreground transition-colors ${right ? "text-right" : "text-left"} ${col === "vpn" ? "w-32" : col === "brand" ? "w-24" : col === "soh" || col === "soo" ? "w-20" : col === "price" ? "w-24" : col === "movement" || col === "spread" ? "w-32" : ""} ${active ? "text-foreground" : ""}`}
+                      >
+                        <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
+                          {labels[col!]}
+                          <Icon className="h-3 w-3 shrink-0" />
+                        </span>
+                      </th>
+                    );
+                  })}
               </tr>
             </thead>
             <tbody>
