@@ -22,7 +22,7 @@ import { eq, sql } from "drizzle-orm";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const LLM_MODEL = "claude-sonnet-4-6";
+export const LLM_MODEL = "claude-haiku-4-5";
 export const DAILY_LLM_CAP = 100;
 const LLM_TIMEOUT_MS = 60_000;
 
