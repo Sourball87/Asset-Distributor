@@ -225,16 +225,16 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     `);
     const total = parseInt(String(countRows.rows[0]?.total ?? "0"), 10);
 
-    // Build sort expression — computed in a CTE so pagination is on the sorted result
-    const sortColSql =
-      sortBy === "soh"      ? sql`agg.latest_soh`
-      : sortBy === "soo"    ? sql`agg.latest_soo`
-      : sortBy === "price"  ? sql`agg.latest_price`
-      : sortBy === "movement" ? sql`agg.movement`
-      : sortBy === "vpn"    ? sql`p.vpn_normalized`
-      : sortBy === "brand"  ? sql`p.brand`
-      :                       sql`p.description`;
-    const dirSql = sortDir === "asc" ? sql`ASC` : sql`DESC`;
+    // Build sort expression using sql.raw() so column/direction aren't parameterized
+    const sortColName =
+      sortBy === "soh"        ? "agg.latest_soh"
+      : sortBy === "soo"      ? "agg.latest_soo"
+      : sortBy === "price"    ? "agg.latest_price"
+      : sortBy === "movement" ? "agg.movement"
+      : sortBy === "vpn"      ? "p.vpn_normalized"
+      : sortBy === "brand"    ? "p.brand"
+      :                         "p.description";
+    const orderByClause = sql.raw(`${sortColName} ${sortDir === "asc" ? "ASC" : "DESC"} NULLS LAST`);
 
     // Paginated product list — CTE computes latest/prev snapshot values then sorts
     const productIdRows = await db.execute<{ product_id: string }>(sql`
@@ -266,7 +266,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       SELECT agg.product_id
       FROM agg
       JOIN products p ON p.id = agg.product_id
-      ORDER BY ${sortColSql} ${dirSql} NULLS LAST
+      ORDER BY ${orderByClause}
       LIMIT ${limit} OFFSET ${offset}
     `);
     const productIds = productIdRows.rows.map((r) => parseInt(String(r.product_id), 10));
