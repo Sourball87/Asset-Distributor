@@ -624,3 +624,86 @@ export const GetMovementResponse = zod.object({
 })
 
 
+/**
+ * Search a SKU and see comparable products from other brands across all distributor feeds, with market pricing. Admin-only, results are cached for 7 days.
+ * @summary Find cross-brand equivalent products for a given product ID
+ */
+export const GetMarketPriceQueryParams = zod.object({
+  "productId": zod.coerce.number()
+})
+
+export const GetMarketPriceResponse = zod.object({
+  "source": zod.object({
+  "productId": zod.number().nullable(),
+  "brand": zod.string().nullable(),
+  "vpnDisplay": zod.string().nullable(),
+  "description": zod.string(),
+  "prices": zod.array(zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "sellPrice": zod.number().nullable(),
+  "snapshotDate": zod.string()
+}))
+}),
+  "matches": zod.array(zod.object({
+  "productId": zod.number(),
+  "brand": zod.string(),
+  "vpnDisplay": zod.string(),
+  "description": zod.string(),
+  "similarity": zod.enum(['close', 'partial', 'related']),
+  "reason": zod.string(),
+  "prices": zod.array(zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "sellPrice": zod.number().nullable(),
+  "snapshotDate": zod.string()
+}))
+})),
+  "cached": zod.boolean(),
+  "model": zod.string(),
+  "candidatesEvaluated": zod.number()
+})
+
+
+/**
+ * Search a SKU and see comparable products from other brands across all distributor feeds, with market pricing. Admin-only, results are cached for 7 days.
+ * @summary Find cross-brand equivalent products for a free-text specification
+ */
+export const GetMarketPriceBySpecBody = zod.object({
+  "specText": zod.string().describe('Free-text specification to match against'),
+  "maxPrice": zod.number().nullish().describe('Optional price ceiling (sell price)')
+})
+
+export const GetMarketPriceBySpecResponse = zod.object({
+  "source": zod.object({
+  "productId": zod.number().nullable(),
+  "brand": zod.string().nullable(),
+  "vpnDisplay": zod.string().nullable(),
+  "description": zod.string(),
+  "prices": zod.array(zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "sellPrice": zod.number().nullable(),
+  "snapshotDate": zod.string()
+}))
+}),
+  "matches": zod.array(zod.object({
+  "productId": zod.number(),
+  "brand": zod.string(),
+  "vpnDisplay": zod.string(),
+  "description": zod.string(),
+  "similarity": zod.enum(['close', 'partial', 'related']),
+  "reason": zod.string(),
+  "prices": zod.array(zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "sellPrice": zod.number().nullable(),
+  "snapshotDate": zod.string()
+}))
+})),
+  "cached": zod.boolean(),
+  "model": zod.string(),
+  "candidatesEvaluated": zod.number()
+})
+
+

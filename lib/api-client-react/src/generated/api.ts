@@ -36,12 +36,15 @@ import type {
   ForgotPassword200,
   ForgotPasswordInput,
   GetComparisonParams,
+  GetMarketPriceParams,
   GetMovementParams,
   HealthStatus,
   ImportProfile,
   ImportProfileInput,
   ListUploadsParams,
   LoginInput,
+  MarketPriceBySpecInput,
+  MarketPriceResult,
   MovementResult,
   ParsePreview,
   ParseUploadInput,
@@ -2217,4 +2220,160 @@ export function useGetMovement<TData = Awaited<ReturnType<typeof getMovement>>, 
 
 
 
+
+export const getGetMarketPriceUrl = (params: GetMarketPriceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/experimental/market-price?${stringifiedParams}` : `/api/experimental/market-price`
+}
+
+/**
+ * Search a SKU and see comparable products from other brands across all distributor feeds, with market pricing. Admin-only, results are cached for 7 days.
+ * @summary Find cross-brand equivalent products for a given product ID
+ */
+export const getMarketPrice = async (params: GetMarketPriceParams, options?: RequestInit): Promise<MarketPriceResult> => {
+
+  return customFetch<MarketPriceResult>(getGetMarketPriceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMarketPriceQueryKey = (params?: GetMarketPriceParams,) => {
+    return [
+    `/api/experimental/market-price`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMarketPriceQueryOptions = <TData = Awaited<ReturnType<typeof getMarketPrice>>, TError = ErrorType<ErrorResponse>>(params: GetMarketPriceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketPrice>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMarketPriceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMarketPrice>>> = ({ signal }) => getMarketPrice(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMarketPrice>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMarketPriceQueryResult = NonNullable<Awaited<ReturnType<typeof getMarketPrice>>>
+export type GetMarketPriceQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Find cross-brand equivalent products for a given product ID
+ */
+
+export function useGetMarketPrice<TData = Awaited<ReturnType<typeof getMarketPrice>>, TError = ErrorType<ErrorResponse>>(
+ params: GetMarketPriceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketPrice>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMarketPriceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMarketPriceBySpecUrl = () => {
+
+
+
+
+  return `/api/experimental/market-price/by-spec`
+}
+
+/**
+ * Search a SKU and see comparable products from other brands across all distributor feeds, with market pricing. Admin-only, results are cached for 7 days.
+ * @summary Find cross-brand equivalent products for a free-text specification
+ */
+export const getMarketPriceBySpec = async (marketPriceBySpecInput: MarketPriceBySpecInput, options?: RequestInit): Promise<MarketPriceResult> => {
+
+  return customFetch<MarketPriceResult>(getGetMarketPriceBySpecUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(marketPriceBySpecInput)
+  }
+);}
+
+
+
+
+export const getGetMarketPriceBySpecMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getMarketPriceBySpec>>, TError,{data: BodyType<MarketPriceBySpecInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getMarketPriceBySpec>>, TError,{data: BodyType<MarketPriceBySpecInput>}, TContext> => {
+
+const mutationKey = ['getMarketPriceBySpec'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getMarketPriceBySpec>>, {data: BodyType<MarketPriceBySpecInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  getMarketPriceBySpec(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetMarketPriceBySpecMutationResult = NonNullable<Awaited<ReturnType<typeof getMarketPriceBySpec>>>
+    export type GetMarketPriceBySpecMutationBody = BodyType<MarketPriceBySpecInput>
+    export type GetMarketPriceBySpecMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Find cross-brand equivalent products for a free-text specification
+ */
+export const useGetMarketPriceBySpec = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getMarketPriceBySpec>>, TError,{data: BodyType<MarketPriceBySpecInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getMarketPriceBySpec>>,
+        TError,
+        {data: BodyType<MarketPriceBySpecInput>},
+        TContext
+      > => {
+      return useMutation(getGetMarketPriceBySpecMutationOptions(options));
+    }
 

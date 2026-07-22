@@ -794,6 +794,102 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /experimental/market-price:
+    get:
+      operationId: getMarketPrice
+      summary: Find cross-brand equivalent products for a given product ID
+      description: >
+        Search a SKU and see comparable products from other brands across all
+        distributor feeds, with market pricing. Admin-only, results are cached
+        for 7 days.
+      tags: [experimental]
+      security: [{ session: [] }]
+      parameters:
+        - name: productId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Match result (may be served from cache)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketPriceResult"
+        "429":
+          description: Daily LLM call cap exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Matching service unavailable (timeout or API error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /experimental/market-price/by-spec:
+    post:
+      operationId: getMarketPriceBySpec
+      summary: Find cross-brand equivalent products for a free-text specification
+      description: >
+        Search a SKU and see comparable products from other brands across all
+        distributor feeds, with market pricing. Admin-only, results are cached
+        for 7 days.
+      tags: [experimental]
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketPriceBySpecInput"
+      responses:
+        "200":
+          description: Match result (may be served from cache)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketPriceResult"
+        "429":
+          description: Daily LLM call cap exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Matching service unavailable (timeout or API error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -1272,6 +1368,88 @@ components:
           type: number
         maxPrice:
           type: number
+
+    # --- Market Price ---
+    MarketPriceBySpecInput:
+      type: object
+      required: [specText]
+      properties:
+        specText:
+          type: string
+          description: Free-text specification to match against
+        maxPrice:
+          type: number
+          nullable: true
+          description: Optional price ceiling (sell price)
+
+    MarketPriceDistributorPrice:
+      type: object
+      required: [distributorId, distributorName, sellPrice, snapshotDate]
+      properties:
+        distributorId:
+          type: integer
+        distributorName:
+          type: string
+        sellPrice:
+          type: ["number", "null"]
+        snapshotDate:
+          type: string
+
+    MarketPriceMatch:
+      type: object
+      required: [productId, brand, vpnDisplay, description, similarity, reason, prices]
+      properties:
+        productId:
+          type: integer
+        brand:
+          type: string
+        vpnDisplay:
+          type: string
+        description:
+          type: string
+        similarity:
+          type: string
+          enum: [close, partial, related]
+        reason:
+          type: string
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketPriceDistributorPrice"
+
+    MarketPriceSourceSummary:
+      type: object
+      required: [productId, brand, vpnDisplay, description, prices]
+      properties:
+        productId:
+          type: ["integer", "null"]
+        brand:
+          type: ["string", "null"]
+        vpnDisplay:
+          type: ["string", "null"]
+        description:
+          type: string
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketPriceDistributorPrice"
+
+    MarketPriceResult:
+      type: object
+      required: [source, matches, cached, model, candidatesEvaluated]
+      properties:
+        source:
+          $ref: "#/components/schemas/MarketPriceSourceSummary"
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketPriceMatch"
+        cached:
+          type: boolean
+        model:
+          type: string
+        candidatesEvaluated:
+          type: integer
 
     MovementProduct:
       type: object

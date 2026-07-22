@@ -337,6 +337,59 @@ export interface PriceSpreadFlag {
   maxPrice: number;
 }
 
+export interface MarketPriceBySpecInput {
+  /** Free-text specification to match against */
+  specText: string;
+  /** Optional price ceiling (sell price) */
+  maxPrice?: number | null;
+}
+
+export interface MarketPriceDistributorPrice {
+  distributorId: number;
+  distributorName: string;
+  /** @nullable */
+  sellPrice: number | null;
+  snapshotDate: string;
+}
+
+export type MarketPriceMatchSimilarity = typeof MarketPriceMatchSimilarity[keyof typeof MarketPriceMatchSimilarity];
+
+
+export const MarketPriceMatchSimilarity = {
+  close: 'close',
+  partial: 'partial',
+  related: 'related',
+} as const;
+
+export interface MarketPriceMatch {
+  productId: number;
+  brand: string;
+  vpnDisplay: string;
+  description: string;
+  similarity: MarketPriceMatchSimilarity;
+  reason: string;
+  prices: MarketPriceDistributorPrice[];
+}
+
+export interface MarketPriceSourceSummary {
+  /** @nullable */
+  productId: number | null;
+  /** @nullable */
+  brand: string | null;
+  /** @nullable */
+  vpnDisplay: string | null;
+  description: string;
+  prices: MarketPriceDistributorPrice[];
+}
+
+export interface MarketPriceResult {
+  source: MarketPriceSourceSummary;
+  matches: MarketPriceMatch[];
+  cached: boolean;
+  model: string;
+  candidatesEvaluated: number;
+}
+
 /**
  * Dicker Data stock posture for this product
  */
@@ -493,4 +546,8 @@ export const GetMovementSortDir = {
   asc: 'asc',
   desc: 'desc',
 } as const;
+
+export type GetMarketPriceParams = {
+productId: number;
+};
 

@@ -6,3 +6,4 @@ export * from "./uploads";
 export * from "./products";
 export * from "./stock_snapshots";
 export * from "./password_reset_tokens";
+export * from "./market_price_cache";

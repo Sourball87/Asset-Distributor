@@ -11,6 +11,7 @@ import comparisonExportRouter from "./comparison-export";
 import uploadsRouter from "./uploads";
 import insightsRouter from "./insights";
 import experimentalRouter from "./experimental";
+import marketPriceRouter from "./market-price";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(comparisonExportRouter);
 router.use(uploadsRouter);
 router.use(insightsRouter);
 router.use(experimentalRouter);
+router.use(marketPriceRouter);
 
 export default router;

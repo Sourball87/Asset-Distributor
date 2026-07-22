@@ -20,6 +20,7 @@ import Brands from "@/pages/settings/brands";
 import ImportProfiles from "@/pages/settings/import-profiles";
 import UsersSettings from "@/pages/settings/users";
 import Movement from "@/pages/movement";
+import MarketPrice from "@/pages/market-price";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -160,6 +161,14 @@ function Router() {
         {() => (
           <Layout>
             <AdminRoute component={Movement} />
+          </Layout>
+        )}
+      </Route>
+
+      <Route path="/market-price">
+        {() => (
+          <Layout>
+            <AdminRoute component={MarketPrice} />
           </Layout>
         )}
       </Route>

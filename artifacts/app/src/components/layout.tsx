@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { useLogout, getGetMeQueryKey, useListAdminUsers, getListAdminUsersQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp, FileSliders, Users, Activity } from "lucide-react";
+import { LogOut, LayoutDashboard, Grid, Package, Building2, Upload, TrendingUp, FileSliders, Users, Activity, BarChart2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -49,7 +49,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   ];
 
   const experimentalItems = isAdmin
-    ? [{ href: "/movement", label: "Movement", icon: Activity }]
+    ? [
+        { href: "/movement", label: "Movement", icon: Activity },
+        { href: "/market-price", label: "Market Price", icon: BarChart2 },
+      ]
     : [];
 
   const settingsItems = [
