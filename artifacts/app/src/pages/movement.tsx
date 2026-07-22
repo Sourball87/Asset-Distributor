@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   useGetMovement,
   useListDistributors,
+  useListBrands,
   useCleanupDuplicates,
   getGetMovementQueryKey,
 } from "@workspace/api-client-react";
@@ -49,6 +50,7 @@ export default function Movement() {
   const [offset, setOffset] = useState(0);
 
   const { data: distributors = [] } = useListDistributors();
+  const { data: brands = [] } = useListBrands();
 
   const distIdNum = distributorId ? parseInt(distributorId, 10) : undefined;
   const enabled = !!distIdNum;
@@ -89,8 +91,6 @@ export default function Movement() {
     setDistributorId(v);
     setOffset(0);
   };
-
-  const brands = Array.from(new Set(distributors.map(() => ""))).filter(Boolean);
 
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
@@ -140,6 +140,18 @@ export default function Movement() {
             <SelectItem value="14" className="text-xs">14 days</SelectItem>
             <SelectItem value="30" className="text-xs">30 days</SelectItem>
             <SelectItem value="60" className="text-xs">60 days</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={brand} onValueChange={(v) => { setBrand(v === "_all" ? "" : v); setOffset(0); }}>
+          <SelectTrigger className="h-7 w-36 text-xs">
+            <SelectValue placeholder="All brands" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="_all" className="text-xs">All brands</SelectItem>
+            {brands.map((b) => (
+              <SelectItem key={b.id} value={b.canonicalName} className="text-xs">{b.canonicalName}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
