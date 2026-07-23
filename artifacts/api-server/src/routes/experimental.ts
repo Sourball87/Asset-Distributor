@@ -334,7 +334,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           ${bundleFilter}
           ${refBrandFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
-          ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
+          ${search ? sql`AND (p.vpn_display ILIKE ${"%" + search + "%"} OR p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),
       agg AS (
         SELECT
@@ -383,7 +383,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           ${bundleFilter}
           ${refBrandFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
-          ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
+          ${search ? sql`AND (p.vpn_display ILIKE ${"%" + search + "%"} OR p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),
       agg AS (
         SELECT

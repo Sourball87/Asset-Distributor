@@ -4,11 +4,11 @@ description: Key architecture and schema decisions for the Distributor Pricing &
 ---
 
 ## VPN normalization
-Rule: trim + uppercase + collapse internal whitespace. Dashes preserved (significant in part numbers). Single function `normalizeVpn()` in `artifacts/api-server/src/lib/vpn.ts`.
+Rule: trim + uppercase + strip every char except A–Z, 0–9, and +. Dashes and all other punctuation are STRIPPED. Single function `normalizeVpn()` in `artifacts/api-server/src/lib/vpn.ts`.
 
-**Why:** Part numbers like `WD-1234` and `WD 1234` should NOT be treated as the same — dashes are meaningful in distributor catalogs.
+**Why:** `+` is preserved (PoE+, NBD+ are distinct from non-plus siblings). Dashes are stripped so `WD-1234` and `WD1234` collapse to the same key for cross-distributor matching. `vpn_display` keeps the original raw value for UI display.
 
-**How to apply:** All ingestion paths call `normalizeVpn()` before upsert into `products.vpn_normalized`. The display value (`vpn_display`) stores the original.
+**How to apply:** All ingestion paths call `normalizeVpn()` before upsert into `products.vpn_normalized`. Display value (`vpn_display`) stores the original. **Search must include both `vpn_display` and `vpn_normalized` in ILIKE** — users see and copy `vpn_display` (with dashes), but normalized form strips them. Searching only `vpn_normalized` breaks dash-containing searches.
 
 ## Brand alias matching + visibility tiers
 Alias map lives in the `brands` DB table (editable UI). Matching is case+whitespace insensitive. Canonical names stored UPPERCASE. Helper in `artifacts/api-server/src/lib/brands.ts`.
