@@ -77,7 +77,7 @@ export function DownloadCompareFile() {
   const { data: brandsData }      = useListBrands();
   const { data: distributorsData } = useListDistributors();
 
-  const allBrands      = (brandsData ?? []).map((b) => b.canonicalName).sort();
+  const allBrands      = (brandsData ?? []).filter((b) => !b.referenceOnly).map((b) => b.canonicalName).sort();
   const allCompetitors = (distributorsData ?? []).filter((d) => !d.isBaseline);
 
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
