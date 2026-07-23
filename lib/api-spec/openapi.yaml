@@ -751,6 +751,15 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: includeReferenceBrands
+          in: query
+          required: false
+          description: >
+            When true, include products belonging to reference-only brands.
+            Default false (reference brands hidden from movement view).
+          schema:
+            type: boolean
+            default: false
         - name: activeOnly
           in: query
           required: false
@@ -1046,7 +1055,7 @@ components:
     # --- Brands ---
     Brand:
       type: object
-      required: [id, canonicalName, aliases]
+      required: [id, canonicalName, aliases, referenceOnly]
       properties:
         id:
           type: integer
@@ -1056,6 +1065,11 @@ components:
           type: array
           items:
             type: string
+        referenceOnly:
+          type: boolean
+          description: >
+            When true, this brand is imported for market-price matching only and
+            is hidden from comparison grid, insights, exports, and brand dropdowns.
 
     BrandInput:
       type: object
@@ -1068,6 +1082,9 @@ components:
           type: array
           items:
             type: string
+        referenceOnly:
+          type: boolean
+          default: false
 
     BrandUpdate:
       type: object
@@ -1079,6 +1096,8 @@ components:
           type: array
           items:
             type: string
+        referenceOnly:
+          type: boolean
 
     # --- Import Profiles ---
     ColumnMapping:

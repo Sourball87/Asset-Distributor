@@ -112,18 +112,22 @@ export interface Brand {
   id: number;
   canonicalName: string;
   aliases: string[];
+  /** When true, this brand is imported for market-price matching only and is hidden from comparison grid, insights, exports, and brand dropdowns. */
+  referenceOnly: boolean;
 }
 
 export interface BrandInput {
   /** @minLength 1 */
   canonicalName: string;
   aliases: string[];
+  referenceOnly?: boolean;
 }
 
 export interface BrandUpdate {
   /** @minLength 1 */
   canonicalName?: string;
   aliases?: string[];
+  referenceOnly?: boolean;
 }
 
 export interface ColumnMapping {
@@ -512,6 +516,10 @@ soldOutOnly?: boolean;
  * If true, only return products with no Dicker Data snapshot
  */
 notCarriedByDicker?: boolean;
+/**
+ * When true, include products belonging to reference-only brands. Default false (reference brands hidden from movement view).
+ */
+includeReferenceBrands?: boolean;
 /**
  * When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window
  */

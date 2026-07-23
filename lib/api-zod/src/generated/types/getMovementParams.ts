@@ -27,6 +27,10 @@ soldOutOnly?: boolean;
  */
 notCarriedByDicker?: boolean;
 /**
+ * When true, include products belonging to reference-only brands. Default false (reference brands hidden from movement view).
+ */
+includeReferenceBrands?: boolean;
+/**
  * When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window
  */
 activeOnly?: boolean;

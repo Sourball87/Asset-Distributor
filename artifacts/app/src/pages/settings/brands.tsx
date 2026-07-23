@@ -10,13 +10,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 
 const brandSchema = z.object({
   canonicalName: z.string().min(1, "Canonical name is required"),
-  aliasesString: z.string(), // We'll parse this to string[] before sending
+  aliasesString: z.string(),
+  referenceOnly: z.boolean().default(false),
 });
 
 type BrandFormValues = z.infer<typeof brandSchema>;
@@ -71,12 +73,13 @@ export default function Brands() {
     defaultValues: {
       canonicalName: "",
       aliasesString: "",
+      referenceOnly: false,
     },
   });
 
   const handleOpenCreate = () => {
     setEditingId(null);
-    form.reset({ canonicalName: "", aliasesString: "" });
+    form.reset({ canonicalName: "", aliasesString: "", referenceOnly: false });
     setIsFormOpen(true);
   };
 
@@ -85,6 +88,7 @@ export default function Brands() {
     form.reset({
       canonicalName: brand.canonicalName,
       aliasesString: brand.aliases.join(", "),
+      referenceOnly: brand.referenceOnly ?? false,
     });
     setIsFormOpen(true);
   };
@@ -97,7 +101,7 @@ export default function Brands() {
 
   const onSubmit = (data: BrandFormValues) => {
     const aliases = data.aliasesString.split(",").map(s => s.trim()).filter(Boolean);
-    const payload = { canonicalName: data.canonicalName, aliases };
+    const payload = { canonicalName: data.canonicalName, aliases, referenceOnly: data.referenceOnly };
 
     if (editingId) {
       updateBrand.mutate({ id: editingId, data: payload });
@@ -122,19 +126,20 @@ export default function Brands() {
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow className="h-9 hover:bg-transparent">
-              <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider w-[250px]">Canonical Name</TableHead>
+              <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider w-[220px]">Canonical Name</TableHead>
               <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider">Aliases (Variations)</TableHead>
+              <TableHead className="font-semibold text-xs text-foreground uppercase tracking-wider w-[110px]">Tier</TableHead>
               <TableHead className="text-right font-semibold text-xs text-foreground uppercase tracking-wider w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">Loading brands...</TableCell>
+                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading brands...</TableCell>
               </TableRow>
             ) : brands.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No brands found.</TableCell>
+                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No brands found.</TableCell>
               </TableRow>
             ) : (
               brands.map((brand, idx) => (
@@ -148,6 +153,17 @@ export default function Brands() {
                         </span>
                       )) : <span className="text-muted-foreground/50 text-xs italic">None</span>}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {brand.referenceOnly ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] uppercase font-mono tracking-tight bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-700">
+                        Ref only
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] uppercase font-mono tracking-tight bg-muted text-muted-foreground">
+                        Core
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     {canEdit && (
@@ -202,6 +218,30 @@ export default function Brands() {
                       Comma-separated list of spelling variations found in distributor files.
                     </FormDescription>
                     <FormMessage className="text-xs" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="referenceOnly"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start gap-3 rounded-sm border border-border p-3">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        className="mt-0.5"
+                      />
+                    </FormControl>
+                    <div className="space-y-0.5 leading-none">
+                      <FormLabel className="text-xs font-medium cursor-pointer">
+                        Reference only
+                      </FormLabel>
+                      <FormDescription className="text-[10px] text-muted-foreground">
+                        Imported for market-price matching only — hidden from comparison grid, insights, and exports.
+                      </FormDescription>
+                    </div>
                   </FormItem>
                 )}
               />

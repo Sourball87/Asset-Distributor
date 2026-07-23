@@ -252,7 +252,8 @@ export const DeleteDistributorResponse = zod.void()
 export const ListBrandsResponseItem = zod.object({
   "id": zod.number(),
   "canonicalName": zod.string(),
-  "aliases": zod.array(zod.string())
+  "aliases": zod.array(zod.string()),
+  "referenceOnly": zod.boolean().describe('When true, this brand is imported for market-price matching only and is hidden from comparison grid, insights, exports, and brand dropdowns.\n')
 })
 export const ListBrandsResponse = zod.array(ListBrandsResponseItem)
 
@@ -261,17 +262,19 @@ export const ListBrandsResponse = zod.array(ListBrandsResponseItem)
  * @summary Create a new canonical brand
  */
 
-
+export const createBrandBodyReferenceOnlyDefault = false;
 
 export const CreateBrandBody = zod.object({
   "canonicalName": zod.string().min(1),
-  "aliases": zod.array(zod.string())
+  "aliases": zod.array(zod.string()),
+  "referenceOnly": zod.boolean().default(createBrandBodyReferenceOnlyDefault)
 })
 
 export const CreateBrandResponse = zod.object({
   "id": zod.number(),
   "canonicalName": zod.string(),
-  "aliases": zod.array(zod.string())
+  "aliases": zod.array(zod.string()),
+  "referenceOnly": zod.boolean().describe('When true, this brand is imported for market-price matching only and is hidden from comparison grid, insights, exports, and brand dropdowns.\n')
 })
 
 
@@ -287,13 +290,15 @@ export const UpdateBrandParams = zod.object({
 
 export const UpdateBrandBody = zod.object({
   "canonicalName": zod.string().min(1).optional(),
-  "aliases": zod.array(zod.string()).optional()
+  "aliases": zod.array(zod.string()).optional(),
+  "referenceOnly": zod.boolean().optional()
 })
 
 export const UpdateBrandResponse = zod.object({
   "id": zod.number(),
   "canonicalName": zod.string(),
-  "aliases": zod.array(zod.string())
+  "aliases": zod.array(zod.string()),
+  "referenceOnly": zod.boolean().describe('When true, this brand is imported for market-price matching only and is hidden from comparison grid, insights, exports, and brand dropdowns.\n')
 })
 
 
@@ -566,6 +571,7 @@ export const getMovementQueryOffsetDefault = 0;
 export const getMovementQueryExcludeBundlesDefault = true;
 export const getMovementQuerySoldOutOnlyDefault = false;
 export const getMovementQueryNotCarriedByDickerDefault = false;
+export const getMovementQueryIncludeReferenceBrandsDefault = false;
 export const getMovementQueryActiveOnlyDefault = true;
 export const getMovementQuerySortByDefault = `estWeeklyRevenue`;
 export const getMovementQuerySortDirDefault = `desc`;
@@ -579,6 +585,7 @@ export const GetMovementQueryParams = zod.object({
   "excludeBundles": zod.coerce.boolean().default(getMovementQueryExcludeBundlesDefault).describe('When true (default), hide VPNs that start with \'CTO\' or contain a literal underscore \'_\'. These are typically configure-to-order or bundle line items that distort sell-through metrics. Runs on vpn_display (normalization strips underscores from vpn_normalized).\n'),
   "soldOutOnly": zod.coerce.boolean().default(getMovementQuerySoldOutOnlyDefault).describe('If true, only return products where latest SOH = 0 and estUnitsSold > 0'),
   "notCarriedByDicker": zod.coerce.boolean().default(getMovementQueryNotCarriedByDickerDefault).describe('If true, only return products with no Dicker Data snapshot'),
+  "includeReferenceBrands": zod.coerce.boolean().default(getMovementQueryIncludeReferenceBrandsDefault).describe('When true, include products belonging to reference-only brands. Default false (reference brands hidden from movement view).\n'),
   "activeOnly": zod.coerce.boolean().default(getMovementQueryActiveOnlyDefault).describe('When true (default), exclude products with no SOH, SOO, or movement in any snapshot within the window'),
   "sortBy": zod.enum(['vpn', 'brand', 'desc', 'soh', 'price', 'estWeeklyST', 'estWeeklyRevenue']).default(getMovementQuerySortByDefault).describe('Column to sort by (server-side, applied before pagination)'),
   "sortDir": zod.enum(['asc', 'desc']).default(getMovementQuerySortDirDefault).describe('Sort direction')

@@ -17,6 +17,7 @@ router.get("/brands", requireAuth, async (req, res): Promise<void> => {
     id: b.id,
     canonicalName: b.canonicalName,
     aliases: b.aliases,
+    referenceOnly: b.referenceOnly,
   })));
 });
 
@@ -32,6 +33,7 @@ router.post("/brands", requireElevatedRole, async (req, res): Promise<void> => {
     .values({
       canonicalName: parsed.data.canonicalName.toUpperCase(),
       aliases: parsed.data.aliases,
+      referenceOnly: parsed.data.referenceOnly ?? false,
     })
     .returning();
 
@@ -39,6 +41,7 @@ router.post("/brands", requireElevatedRole, async (req, res): Promise<void> => {
     id: created.id,
     canonicalName: created.canonicalName,
     aliases: created.aliases,
+    referenceOnly: created.referenceOnly,
   });
 });
 
@@ -58,6 +61,7 @@ router.patch("/brands/:id", requireElevatedRole, async (req, res): Promise<void>
   const updates: Partial<typeof brandsTable.$inferInsert> = {};
   if (parsed.data.canonicalName !== undefined) updates.canonicalName = parsed.data.canonicalName.toUpperCase();
   if (parsed.data.aliases !== undefined) updates.aliases = parsed.data.aliases;
+  if (parsed.data.referenceOnly !== undefined) updates.referenceOnly = parsed.data.referenceOnly;
 
   const [updated] = await db
     .update(brandsTable)
@@ -74,6 +78,7 @@ router.patch("/brands/:id", requireElevatedRole, async (req, res): Promise<void>
     id: updated.id,
     canonicalName: updated.canonicalName,
     aliases: updated.aliases,
+    referenceOnly: updated.referenceOnly,
   });
 });
 

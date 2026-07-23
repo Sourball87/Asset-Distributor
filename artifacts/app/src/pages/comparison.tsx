@@ -216,7 +216,7 @@ export default function Comparison() {
   const [selectedDistIds, setSelectedDistIds] = useState<Set<number>>(new Set());
 
   const { data: brandsData } = useListBrands();
-  const brands = brandsData ?? [];
+  const brands = (brandsData ?? []).filter((b) => !b.referenceOnly);
 
   // Debounce search: only send to API 400 ms after the user stops typing
   useEffect(() => {

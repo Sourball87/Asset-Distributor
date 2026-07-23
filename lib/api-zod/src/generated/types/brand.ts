@@ -10,4 +10,6 @@ export interface Brand {
   id: number;
   canonicalName: string;
   aliases: string[];
+  /** When true, this brand is imported for market-price matching only and is hidden from comparison grid, insights, exports, and brand dropdowns. */
+  referenceOnly: boolean;
 }

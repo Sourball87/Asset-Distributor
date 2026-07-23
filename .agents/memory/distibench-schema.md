@@ -10,8 +10,10 @@ Rule: trim + uppercase + collapse internal whitespace. Dashes preserved (signifi
 
 **How to apply:** All ingestion paths call `normalizeVpn()` before upsert into `products.vpn_normalized`. The display value (`vpn_display`) stores the original.
 
-## Brand alias matching
+## Brand alias matching + visibility tiers
 Alias map lives in the `brands` DB table (editable UI). Matching is case+whitespace insensitive. Canonical names stored UPPERCASE. Helper in `artifacts/api-server/src/lib/brands.ts`.
+
+`reference_only boolean NOT NULL DEFAULT false` column on brands. When true: excluded from comparison grid (JOIN filter), insights page dropdown, compare-file export, and movement page by default. Included in market-price candidates (no filter) and admin brands list. Movement endpoint has `includeReferenceBrands` param (default false). Column added via raw SQL (`ALTER TABLE brands ADD COLUMN IF NOT EXISTS reference_only boolean NOT NULL DEFAULT false`) — Drizzle push requires TTY so cannot be run from bash; use raw SQL for non-interactive schema changes.
 
 **Why:** Distributors label the same brand inconsistently (TP-LINK vs TP LINK vs TPLINK). The alias table is user-editable so PMs can add new spellings without a code change.
 

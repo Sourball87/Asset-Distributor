@@ -37,6 +37,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       filtered_products AS (
         SELECT p.id, p.vpn_normalized, p.vpn_display, p.brand, p.description
         FROM products p
+        JOIN brands b ON b.canonical_name = p.brand AND b.reference_only = false
         WHERE ($1::text IS NULL OR p.brand = $1)
           AND ($2::text IS NULL OR (
                p.vpn_normalized ILIKE $2

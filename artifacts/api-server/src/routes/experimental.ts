@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, stockSnapshotsTable, productsTable, distributorsTable } from "@workspace/db";
+import { db, stockSnapshotsTable, productsTable, distributorsTable, brandsTable } from "@workspace/db";
 import { eq, and, gte, ilike, inArray, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { classifyMovement } from "../lib/movement-classifier";
@@ -157,8 +157,9 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
   const search     = req.query.search ? String(req.query.search).trim() : null;
   const activeOnly         = req.query.activeOnly         !== "false";
   const excludeBundles     = req.query.excludeBundles     !== "false";
-  const soldOutOnly        = req.query.soldOutOnly        === "true";
-  const notCarriedByDicker = req.query.notCarriedByDicker === "true";
+  const soldOutOnly            = req.query.soldOutOnly            === "true";
+  const notCarriedByDicker    = req.query.notCarriedByDicker    === "true";
+  const includeReferenceBrands = req.query.includeReferenceBrands === "true";
 
   const validSortBy  = ["vpn", "brand", "desc", "soh", "price", "estWeeklyST", "estWeeklyRevenue"] as const;
   type SortByCol = typeof validSortBy[number];
@@ -310,6 +311,11 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           )`
         : sql``;
 
+    // reference-only brand filter — join brands and exclude reference_only unless opted in
+    const refBrandFilter = includeReferenceBrands
+      ? sql``
+      : sql`AND p.brand IN (SELECT canonical_name FROM brands WHERE reference_only = false)`;
+
     // --- Count query (same filter stack as paginated query for accurate totals) ---
     const countRows = await db.execute<{ total: string }>(sql`
       WITH ordered AS (
@@ -326,6 +332,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           AND ss.snapshot_date >= ${cutoffStr}::date
           ${activeFilter}
           ${bundleFilter}
+          ${refBrandFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
           ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),
@@ -374,6 +381,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
           AND ss.snapshot_date >= ${cutoffStr}::date
           ${activeFilter}
           ${bundleFilter}
+          ${refBrandFilter}
           ${brand  ? sql`AND p.brand = ${brand}` : sql``}
           ${search ? sql`AND (p.vpn_normalized ILIKE ${"%" + search + "%"} OR p.description ILIKE ${"%" + search + "%"})` : sql``}
       ),

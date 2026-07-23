@@ -10,4 +10,5 @@ export interface BrandUpdate {
   /** @minLength 1 */
   canonicalName?: string;
   aliases?: string[];
+  referenceOnly?: boolean;
 }

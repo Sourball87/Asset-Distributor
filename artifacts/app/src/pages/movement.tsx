@@ -114,9 +114,11 @@ export default function Movement() {
   const [excludeBundles, setExcludeBundles] = useState(true);
   const [soldOutOnly, setSoldOutOnly] = useState(false);
   const [notCarriedByDicker, setNotCarriedByDicker] = useState(false);
+  const [includeReferenceBrands, setIncludeReferenceBrands] = useState(false);
 
   const { data: distributors = [] } = useListDistributors();
-  const { data: brands = [] } = useListBrands();
+  const { data: brandsRaw = [] } = useListBrands();
+  const brands = includeReferenceBrands ? brandsRaw : brandsRaw.filter((b) => !b.referenceOnly);
 
   const distIdNum = distributorId ? parseInt(distributorId, 10) : undefined;
   const enabled = !!distIdNum;
@@ -130,6 +132,7 @@ export default function Movement() {
       excludeBundles,
       soldOutOnly,
       notCarriedByDicker,
+      includeReferenceBrands,
       sortBy: sortCol,
       sortDir,
       limit: PAGE_SIZE,
@@ -146,6 +149,7 @@ export default function Movement() {
           excludeBundles,
           soldOutOnly,
           notCarriedByDicker,
+          includeReferenceBrands,
           sortBy: sortCol,
           sortDir,
           limit: PAGE_SIZE,
@@ -353,6 +357,17 @@ export default function Movement() {
           }`}
         >
           Hide bundles/CTO
+        </button>
+
+        <button
+          onClick={() => { setIncludeReferenceBrands((v) => !v); setBrand(""); resetPaging(); }}
+          className={`h-7 px-2.5 rounded-sm border text-xs transition-colors select-none ${
+            includeReferenceBrands
+              ? "bg-amber-100 border-amber-500 text-amber-800 dark:bg-amber-950/40 dark:border-amber-500 dark:text-amber-300 font-medium"
+              : "text-muted-foreground border-border hover:bg-secondary/50"
+          }`}
+        >
+          Include reference brands
         </button>
       </div>
 

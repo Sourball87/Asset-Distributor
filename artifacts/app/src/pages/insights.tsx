@@ -958,7 +958,7 @@ export default function InsightsPage() {
               </span>
             </SelectTrigger>
             <SelectContent>
-              {(brands ?? []).map((b) => (
+              {(brands ?? []).filter((b) => !b.referenceOnly).map((b) => (
                 <SelectItem key={b.id} value={String(b.id)} className="text-xs">
                   {b.canonicalName}
                 </SelectItem>

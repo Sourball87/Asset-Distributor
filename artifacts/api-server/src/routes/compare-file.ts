@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, distributorsTable, productsTable, uploadsTable } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { db, distributorsTable, productsTable, uploadsTable, brandsTable } from "@workspace/db";
+import { sql, eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import ExcelJS from "exceljs";
 
@@ -80,11 +80,19 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
     freshnessMap.set(r.distributor_id, r.last_date);
   }
 
-  // ── 3. Products ──────────────────────────────────────────────
+  // ── 3. Products (exclude reference-only brands) ──────────────
+  const coreBrands = await db
+    .select({ canonicalName: brandsTable.canonicalName })
+    .from(brandsTable)
+    .where(eq(brandsTable.referenceOnly, false));
+  const coreBrandNames = new Set(coreBrands.map((b) => b.canonicalName));
+
   let products = await db
     .select()
     .from(productsTable)
     .orderBy(productsTable.brand, productsTable.vpnNormalized);
+  // Filter to core brands first, then to any user-selected brands
+  products = products.filter((p) => coreBrandNames.has(p.brand));
   if (selectedBrands.length > 0) {
     products = products.filter((p) => selectedBrands.includes(p.brand));
   }
