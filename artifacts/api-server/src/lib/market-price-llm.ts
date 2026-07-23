@@ -147,6 +147,99 @@ export interface LlmJudgeResult {
   matches: LlmMatch[];
 }
 
+// ── Retrieval helpers: form-factor + CPU family extraction ────────────────
+
+/**
+ * Extract the most specific form-factor token from a description, or null.
+ * Priority order ensures MFF/SFF win over the generic DESKTOP token.
+ */
+export function extractFormFactor(desc: string): string | null {
+  const tokens = ["MFF", "SFF", "MICRO", "MINI", "TOWER", "TWR", "AIO", "DESKTOP"] as const;
+  const upper = desc.toUpperCase();
+  for (const t of tokens) {
+    // Require non-alphanumeric boundary on both sides to avoid partial matches
+    if (new RegExp(`(?<![A-Z0-9])${t}(?![A-Z0-9])`).test(upper)) return t;
+  }
+  return null;
+}
+
+/**
+ * Extract a normalised CPU family prefix from a description, or null.
+ * Returns values like "I7", "I5", "U7", "R5" — identical strings mean same tier.
+ * Also returns a `sqlPattern` suitable for a PostgreSQL ILIKE expression.
+ */
+export function extractCpuFamily(desc: string): string | null {
+  const upper = desc.toUpperCase();
+
+  // Intel Core iN-XXXX (e.g. I7-13700, I5-14500T)
+  const intelCore = upper.match(/\bI([3579])-\d{4,5}/);
+  if (intelCore) return `I${intelCore[1]!}`;
+
+  // Intel Ultra U-series (e.g. U7-265, U5-125)
+  const intelUltra = upper.match(/\bU([579])-\d{3}/);
+  if (intelUltra) return `U${intelUltra[1]!}`;
+
+  // AMD Ryzen R-series VPN notation (e.g. R7 7745, R5 7600)
+  const amdR = upper.match(/\bR([579])\s+\d{4}/);
+  if (amdR) return `R${amdR[1]!}`;
+
+  // Ryzen spelled out (e.g. Ryzen 7, Ryzen 5)
+  const ryzen = upper.match(/RYZEN\s+([579])\b/);
+  if (ryzen) return `R${ryzen[1]!}`;
+
+  // Intel Core new naming: Core 5, Core 7, Core 9
+  const coreNew = upper.match(/\bCORE\s+([579])\b/);
+  if (coreNew) return `CORE${coreNew[1]!}`;
+
+  return null;
+}
+
+// ── Deterministic guard ────────────────────────────────────────────────────
+
+export interface GuardableMatch {
+  description: string;
+  similarity: "close" | "partial" | "related";
+  reason: string;
+}
+
+/**
+ * Post-processing guard: demote "close" → "partial" when CPU tier or form
+ * factor can be extracted from BOTH source and candidate descriptions and they
+ * differ.  Never upgrades; never touches "related".  Token not extractable from
+ * either side → no demotion (safe fallback).
+ */
+export function applyDeterministicGuard<T extends GuardableMatch>(
+  sourceDesc: string,
+  matches: T[],
+): T[] {
+  const sourceFf = extractFormFactor(sourceDesc);
+  const sourceCpu = extractCpuFamily(sourceDesc);
+
+  return matches.map((m) => {
+    if (m.similarity !== "close") return m; // only "close" can be demoted
+
+    const candidateFf = extractFormFactor(m.description);
+    const candidateCpu = extractCpuFamily(m.description);
+
+    const ffDiffers =
+      sourceFf != null && candidateFf != null && sourceFf !== candidateFf;
+    const cpuDiffers =
+      sourceCpu != null && candidateCpu != null && sourceCpu !== candidateCpu;
+
+    if (!ffDiffers && !cpuDiffers) return m;
+
+    const tags: string[] = [];
+    if (ffDiffers) tags.push("form-factor differs");
+    if (cpuDiffers) tags.push("tier differs");
+
+    return {
+      ...m,
+      similarity: "partial" as const,
+      reason: `${m.reason} [${tags.join(", ")}]`,
+    };
+  });
+}
+
 // ── Prompts ───────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a product-matching analyst for an IT distributor. \

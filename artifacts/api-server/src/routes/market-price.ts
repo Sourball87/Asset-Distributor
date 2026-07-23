@@ -27,6 +27,9 @@ import {
   LlmCapExceededError,
   LlmUnavailableError,
   LLM_MODEL,
+  extractFormFactor,
+  extractCpuFamily,
+  applyDeterministicGuard,
   type LlmCandidate,
 } from "../lib/market-price-llm";
 
@@ -152,6 +155,21 @@ async function getCandidates(opts: {
     ? sql.raw(`ARRAY[${keywords.map((k) => `'${k.replace(/'/g, "''")}'`).join(",")}]::text[]`)
     : sql.raw(`ARRAY[]::text[]`);
 
+  // Distinctive-token boosts: rank within each brand's cap by form-factor and
+  // CPU family match so that e.g. HP SFF i7 desktops beat HP keyboards/monitors
+  // for a source product that is an SFF i7 desktop.
+  const ffToken = extractFormFactor(opts.sourceDescription);
+  const cpuFamily = extractCpuFamily(opts.sourceDescription);
+
+  // Build ILIKE patterns; null → emit literal 0 (no boost).
+  const ffBoostExpr = ffToken != null
+    ? sql`CASE WHEN p.description ILIKE ${`%${ffToken}%`} THEN 10 ELSE 0 END`
+    : sql.raw(`0`);
+  // CPU: append '-' so "%I7-%" matches "I7-13700" but not "I7" in unrelated strings.
+  const cpuBoostExpr = cpuFamily != null
+    ? sql`CASE WHEN p.description ILIKE ${`%${cpuFamily}-%`} THEN 5 ELSE 0 END`
+    : sql.raw(`0`);
+
   const bundleExclude = sql.raw(`NOT COALESCE(
     CASE
       WHEN latest.sku_type IS NOT NULL AND latest.sku_type != ''
@@ -189,7 +207,9 @@ async function getCandidates(opts: {
           SELECT COUNT(*)
           FROM UNNEST(${kwArray}) AS kw
           WHERE LOWER(p.description) LIKE '%' || kw || '%'
-        ) AS keyword_overlap
+        ) AS keyword_overlap,
+        (${ffBoostExpr}) AS ff_boost,
+        (${cpuBoostExpr}) AS cpu_boost
       FROM products p
       JOIN latest ON latest.product_id = p.id
       WHERE p.brand != ${opts.sourceBrand}
@@ -205,14 +225,14 @@ async function getCandidates(opts: {
       SELECT *,
         ROW_NUMBER() OVER (
           PARTITION BY brand
-          ORDER BY keyword_overlap DESC, latest_price::numeric ASC
+          ORDER BY (keyword_overlap + ff_boost + cpu_boost) DESC, latest_price::numeric ASC
         ) AS brand_rank
       FROM raw_candidates
     )
     SELECT product_id, brand, vpn_display, description, latest_price
     FROM ranked
     WHERE brand_rank <= ${BRAND_CAP}
-    ORDER BY keyword_overlap DESC, latest_price::numeric ASC
+    ORDER BY (keyword_overlap + ff_boost + cpu_boost) DESC, latest_price::numeric ASC
     LIMIT ${CANDIDATE_LIMIT}
   `);
 
@@ -330,7 +350,7 @@ async function runPipeline(opts: {
   // Map indices back to real products
   const priceMap = await getLatestPricesForProducts(candidates.map((c) => c.productId));
 
-  const matches: MatchRow[] = judgeResult.matches
+  const rawMatches: MatchRow[] = judgeResult.matches
     .filter((m) => m.index >= 0 && m.index < candidates.length)
     .map((m) => {
       const c = candidates[m.index]!;
@@ -344,6 +364,10 @@ async function runPipeline(opts: {
         prices: priceMap.get(c.productId) ?? [],
       };
     });
+
+  // Deterministic guard: demote "close" → "partial" when CPU tier or form
+  // factor is extractable from both descriptions and they differ.
+  const matches = applyDeterministicGuard(opts.sourceDescription, rawMatches);
 
   const result: MarketPriceResponse = {
     source: {
