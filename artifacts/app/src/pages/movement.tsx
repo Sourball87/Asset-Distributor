@@ -52,7 +52,7 @@ function fmtDate(s: string | null | undefined): string {
 
 function fmtPrice(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 // Minimal SVG sparkline of SOH over the window
@@ -482,7 +482,7 @@ export default function Movement() {
                     <td className="px-3 py-1.5 text-right font-mono">
                       {hasSufficientData ? (
                         <div>
-                          <div>{p.estWeeklyST != null ? fmt(p.estWeeklyST, 1) : "—"}</div>
+                          <div>{p.estWeeklyST != null ? fmt(p.estWeeklyST) : "—"}</div>
                           <div className="text-[10px] text-muted-foreground/60 font-sans">
                             {p.snapshotCount} snaps / {p.daysCovered}d
                           </div>
