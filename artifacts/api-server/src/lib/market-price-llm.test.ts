@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   stripFences,
   makeQueryHash,
@@ -9,6 +9,8 @@ import {
   extractFormFactor,
   extractCpuFamily,
   applyDeterministicGuard,
+  buildTokenGroups,
+  detectClassHint,
 } from "./market-price-llm";
 
 // ── stripFences ────────────────────────────────────────────────────────────
@@ -112,6 +114,72 @@ describe("callLlmJudge — fenced JSON handling", () => {
     const result = await judge("laptop", candidates);
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0]!.similarity).toBe("close");
+  });
+});
+
+// ── callLlmJudge — classHint appended to user message ────────────────────
+
+describe("callLlmJudge — classHint in user message", () => {
+  // Reset module registry before each test so _client singleton is cleared
+  // and vi.doMock picks up the fresh Anthropic mock.
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("includes COMPONENT CONTEXT line when classHint is provided", async () => {
+    let capturedContent = "";
+
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: class {
+        messages = {
+          create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
+            capturedContent = opts.messages[0]?.content ?? "";
+            return { content: [{ type: "text", text: '{"matches":[]}' }] };
+          },
+        };
+      },
+    }));
+
+    const { callLlmJudge: judge } = await import("./market-price-llm");
+
+    const candidates = [
+      { index: 0, brand: "ASUS", vpnDisplay: "SSD-X1", description: "M.2 NVMe 256GB SSD" },
+    ];
+
+    await judge(
+      "256gb m2",
+      candidates,
+      120,
+      "a storage drive (SSD/NVMe/M.2); systems that contain one are NOT matches",
+    );
+
+    expect(capturedContent).toContain("COMPONENT CONTEXT:");
+    expect(capturedContent).toContain("storage drive");
+  });
+
+  it("omits COMPONENT CONTEXT line when classHint is null", async () => {
+    let capturedContent = "";
+
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: class {
+        messages = {
+          create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
+            capturedContent = opts.messages[0]?.content ?? "";
+            return { content: [{ type: "text", text: '{"matches":[]}' }] };
+          },
+        };
+      },
+    }));
+
+    const { callLlmJudge: judge } = await import("./market-price-llm");
+
+    const candidates = [
+      { index: 0, brand: "DELL", vpnDisplay: "D001", description: "laptop 16GB 512GB" },
+    ];
+
+    await judge("i7 laptop 16gb", candidates, 120, null);
+
+    expect(capturedContent).not.toContain("COMPONENT CONTEXT");
   });
 });
 
@@ -281,5 +349,119 @@ describe("applyDeterministicGuard", () => {
     expect(result[0]!.brand).toBe("DELL");
     expect(result[0]!.vpnDisplay).toBe("BST999");
     expect(result[0]!.similarity).toBe("partial");
+  });
+});
+
+// ── buildTokenGroups ──────────────────────────────────────────────────────
+
+describe("buildTokenGroups", () => {
+  it("expands 'm2' to the m.2/m2 synonym group", () => {
+    const groups = buildTokenGroups("256gb m2");
+    const m2Group = groups.find((g) => g.variants.includes("m.2"));
+    expect(m2Group).toBeDefined();
+    expect(m2Group?.variants).toContain("m2");
+  });
+
+  it("expands size tokens to with/without-space variants", () => {
+    const groups = buildTokenGroups("256gb ssd");
+    const sizeGroup = groups.find((g) => g.variants.includes("256gb"));
+    expect(sizeGroup).toBeDefined();
+    expect(sizeGroup?.variants).toContain("256 gb");
+  });
+
+  it("keeps 'ssd' despite being only 3 chars (synonym map bypass)", () => {
+    const groups = buildTokenGroups("ssd nvme 512gb");
+    const ssdGroup = groups.find((g) => g.variants.includes("ssd"));
+    expect(ssdGroup).toBeDefined();
+  });
+
+  it("filters out tokens shorter than 4 chars that are not in the synonym map", () => {
+    const groups = buildTokenGroups("a pc hdd");
+    // 'a' (1) and 'pc' (2) should be filtered; 'hdd' in synonym map passes
+    const keys = groups.flatMap((g) => g.variants);
+    expect(keys).not.toContain("a");
+    expect(keys).not.toContain("pc");
+    expect(keys).toContain("hdd");
+  });
+
+  it("deduplicates tokens — 'm2' and 'm.2' both normalize to the same group", () => {
+    const groups = buildTokenGroups("m2 m.2 256gb");
+    // Both normalize to key 'm2' → only one group for M.2
+    const m2Groups = groups.filter((g) => g.variants.includes("m.2"));
+    expect(m2Groups).toHaveLength(1);
+  });
+
+  it("assigns unique groupIds", () => {
+    const groups = buildTokenGroups("256gb m2 ssd nvme");
+    const ids = groups.map((g) => g.groupId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("caps output at 30 groups", () => {
+    // Build a long string with many distinct 5-char tokens
+    const words = Array.from({ length: 50 }, (_, i) => `word${String(i).padStart(2, "0")}`).join(" ");
+    const groups = buildTokenGroups(words);
+    expect(groups.length).toBeLessThanOrEqual(30);
+  });
+
+  it("returns empty array for an empty string", () => {
+    expect(buildTokenGroups("")).toHaveLength(0);
+  });
+
+  it("handles 'nvme' correctly — single variant that matches NVMe in descriptions", () => {
+    const groups = buildTokenGroups("nvme drive");
+    const nvmeGroup = groups.find((g) => g.variants.includes("nvme"));
+    expect(nvmeGroup).toBeDefined();
+  });
+});
+
+// ── detectClassHint ───────────────────────────────────────────────────────
+
+describe("detectClassHint", () => {
+  it("returns a drive hint for 'ssd' without a system token", () => {
+    const hint = detectClassHint("256gb ssd");
+    expect(hint).not.toBeNull();
+    expect(hint).toContain("storage drive");
+    expect(hint).toContain("NOT matches");
+  });
+
+  it("returns a drive hint for 'm2' input", () => {
+    expect(detectClassHint("256gb m2")).toContain("storage drive");
+  });
+
+  it("returns a drive hint for 'nvme' input", () => {
+    expect(detectClassHint("512gb nvme")).toContain("storage drive");
+  });
+
+  it("returns a RAM hint for 'ram' input", () => {
+    expect(detectClassHint("16gb ram ddr5")).toContain("memory module");
+  });
+
+  it("returns a RAM hint for 'dimm' input", () => {
+    expect(detectClassHint("32gb dimm")).toContain("memory module");
+  });
+
+  it("returns a GPU hint", () => {
+    expect(detectClassHint("rtx 4070 gpu")).toContain("graphics card");
+  });
+
+  it("returns a PSU hint", () => {
+    expect(detectClassHint("750w psu")).toContain("power supply");
+  });
+
+  it("returns null when spec mentions 'laptop' (system token overrides)", () => {
+    expect(detectClassHint("laptop ssd 512gb")).toBeNull();
+  });
+
+  it("returns null when spec mentions 'desktop'", () => {
+    expect(detectClassHint("desktop with 256gb ssd")).toBeNull();
+  });
+
+  it("returns null when no component token present", () => {
+    expect(detectClassHint("8-port gigabit switch")).toBeNull();
+  });
+
+  it("returns null for an empty string", () => {
+    expect(detectClassHint("")).toBeNull();
   });
 });

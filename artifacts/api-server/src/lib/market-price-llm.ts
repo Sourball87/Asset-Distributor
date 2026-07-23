@@ -240,6 +240,146 @@ export function applyDeterministicGuard<T extends GuardableMatch>(
   });
 }
 
+// ── Token synonym groups for by-spec retrieval ────────────────────────────
+
+/**
+ * Synonym map: normalized token (lowercase alphanum) → list of ILIKE patterns.
+ * Patterns are matched against LOWER(description) via ILIKE.
+ *
+ * Purpose: user input like "m2" or "256gb" needs to match descriptions that
+ * write "M.2" or "256 GB". The OR-group approach counts a group as "matched"
+ * if ANY variant in the group appears in the description.
+ */
+export const TOKEN_SYNONYMS: Record<string, string[]> = {
+  m2:   ["m.2", "m2"],   // M.2 slot — descriptions typically write "M.2" not "M2"
+  nvme: ["nvme"],
+  ssd:  ["ssd"],
+  hdd:  ["hdd"],
+  ram:  ["ram"],
+  gpu:  ["gpu"],
+  psu:  ["psu"],
+  dimm: ["dimm"],
+};
+
+/** Minimum token length for tokens NOT in the synonym map */
+const TOKEN_MIN_LEN = 4;
+
+/** Size unit pattern: "256gb", "512tb", "16gb", "2tb" → expand with and without space */
+const SIZE_UNIT_RE = /^(\d+)(gb|tb|mb|ghz|mhz)$/;
+
+export interface TokenGroup {
+  groupId: number;
+  variants: string[];
+}
+
+/**
+ * Tokenize a description into OR-groups for keyword_overlap scoring.
+ *
+ * Each group's variants are OR'd when matching against candidate descriptions.
+ * The overlap score = number of groups where at least one variant matched.
+ *
+ * Rules:
+ * - Lowercase, replace non-alphanum-non-dot with space, split on whitespace
+ * - For map lookup: strip dots from token to get the key ("m.2" → "m2")
+ * - TOKEN_SYNONYMS hit: include regardless of key length, expand to variants
+ * - Size tokens (e.g. "256gb"): expand to ["256gb", "256 gb"]
+ * - Other tokens: include only if key length >= TOKEN_MIN_LEN
+ * - Max 30 groups total
+ */
+export function buildTokenGroups(desc: string): TokenGroup[] {
+  const rawTokens = desc
+    .toLowerCase()
+    .replace(/[^a-z0-9.\s]/g, " ")   // keep dots so "m.2" stays intact
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const groups: TokenGroup[] = [];
+  const seenKeys = new Set<string>();
+  let gId = 0;
+
+  for (const token of rawTokens) {
+    // Key = alphanum-only (used for synonym map lookup + length check)
+    const key = token.replace(/[^a-z0-9]/g, "");
+    if (!key) continue;
+
+    // Deduplicate by key
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    // Synonym map: bypass length filter, use synonym variants
+    const synonyms = TOKEN_SYNONYMS[key];
+    if (synonyms) {
+      groups.push({ groupId: gId++, variants: synonyms });
+      continue;
+    }
+
+    // Size unit: "256gb" → ["256gb", "256 gb"] to match both notations
+    const sizeMatch = key.match(SIZE_UNIT_RE);
+    if (sizeMatch) {
+      const [, num, unit] = sizeMatch;
+      groups.push({ groupId: gId++, variants: [`${num}${unit}`, `${num} ${unit}`] });
+      continue;
+    }
+
+    // Regular token: apply min-length filter
+    if (key.length < TOKEN_MIN_LEN) continue;
+
+    groups.push({ groupId: gId++, variants: [key] });
+  }
+
+  return groups.slice(0, 30);
+}
+
+// ── Class hint detection ───────────────────────────────────────────────────
+
+/** Component token sets → human-readable label for the judge hint */
+const COMPONENT_HINT_MAP: Array<{ tokens: string[]; label: string }> = [
+  {
+    tokens: ["ssd", "m2", "nvme", "m.2"],
+    label: "a storage drive (SSD/NVMe/M.2)",
+  },
+  {
+    tokens: ["ram", "dimm"],
+    label: "a memory module (RAM/DIMM)",
+  },
+  {
+    tokens: ["gpu"],
+    label: "a graphics card (GPU)",
+  },
+  {
+    tokens: ["psu"],
+    label: "a power supply unit (PSU)",
+  },
+];
+
+/** If any of these appear in the spec, the user wants a SYSTEM → no component hint */
+const SYSTEM_TOKENS = [
+  "laptop", "notebook", "desktop", "workstation", "server", "tower", "aio",
+];
+
+/**
+ * Detect whether a spec text is asking for a standalone component (SSD, RAM,
+ * GPU, PSU) without also mentioning a system type. When detected, returns a
+ * hint string to append to the LLM judge user message so that systems
+ * containing the component are not incorrectly matched.
+ *
+ * Returns null when the spec mentions a system type or no component token.
+ */
+export function detectClassHint(specText: string): string | null {
+  const lower = specText.toLowerCase();
+
+  // Spec mentions a system → user wants a system, not a standalone component
+  if (SYSTEM_TOKENS.some((t) => lower.includes(t))) return null;
+
+  for (const { tokens, label } of COMPONENT_HINT_MAP) {
+    if (tokens.some((t) => lower.includes(t))) {
+      return `${label}; systems that contain one are NOT matches — only the standalone component qualifies`;
+    }
+  }
+
+  return null;
+}
+
 // ── Prompts ───────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a product-matching analyst for an IT distributor. \
@@ -260,29 +400,35 @@ assign it "related" with the condition stated in the reason, or omit it entirely
 
 /**
  * Call the LLM to judge which candidates match the source.
- * Enforces a 15-second timeout and strips fences.
+ * Enforces a 60-second timeout and strips fences.
  * Does NOT check or increment the daily cap — callers must do that first.
  *
  * @param sourceDescription  Human-readable source description (product or spec text)
  * @param candidates         List of candidate products
+ * @param maxCandidates      Slice candidates to this many before sending (default 120)
+ * @param classHint          Optional component context appended to user message.
+ *                           Use detectClassHint() to derive. When set, the judge
+ *                           is warned that systems containing the component are not matches.
  * @returns Parsed LlmJudgeResult with only valid indices retained
  */
 export async function callLlmJudge(
   sourceDescription: string,
   candidates: LlmCandidate[],
   maxCandidates = 120,
+  classHint?: string | null,
 ): Promise<LlmJudgeResult> {
   const client = getClient();
   const cands = candidates.slice(0, maxCandidates);
 
-  const userMessage = [
-    `SOURCE: ${sourceDescription}`,
-    "",
-    "CANDIDATES:",
-    ...cands.map(
-      (c) => `${c.index}. [${c.brand}] ${c.vpnDisplay} — ${c.description}`,
-    ),
-  ].join("\n");
+  const lines: string[] = [`SOURCE: ${sourceDescription}`];
+  if (classHint) {
+    lines.push(`COMPONENT CONTEXT: The user seeks ${classHint}.`);
+  }
+  lines.push("", "CANDIDATES:");
+  lines.push(...cands.map(
+    (c) => `${c.index}. [${c.brand}] ${c.vpnDisplay} — ${c.description}`,
+  ));
+  const userMessage = lines.join("\n");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);

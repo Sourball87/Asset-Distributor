@@ -9,9 +9,9 @@
  *   POST /experimental/market-price/by-spec          — by free-text spec
  *
  * Both share the same pipeline:
- *   1. Candidate retrieval (SQL) — price-band + description keyword overlap, top 120, no bundles
+ *   1. Candidate retrieval (SQL) — price-band + OR-group token overlap, top 120, no bundles
  *   2. 7-day cache check (query_hash) → skip LLM if hit
- *   3. LLM judge (Anthropic claude-sonnet-4-6) — daily cap enforced
+ *   3. LLM judge (Anthropic claude-haiku-4-5) — daily cap enforced
  *   4. Response: source summary, matches[], cached bool, model, candidatesEvaluated
  */
 
@@ -30,6 +30,8 @@ import {
   extractFormFactor,
   extractCpuFamily,
   applyDeterministicGuard,
+  buildTokenGroups,
+  detectClassHint,
   type LlmCandidate,
 } from "../lib/market-price-llm";
 
@@ -42,6 +44,9 @@ const BRAND_CAP = 30;        // max candidates per brand before sending to LLM
 const PRICE_BAND_LOW = 0.4;
 const PRICE_BAND_HIGH = 2.5;
 const CACHE_DAYS = 7;
+
+const NOT_COVERED_MSG =
+  "No products of this type found in current feeds — this category may not be covered by tracked brands";
 
 // ── Schema helpers ─────────────────────────────────────────────────────────
 
@@ -85,6 +90,8 @@ interface MarketPriceResponse {
   cached: boolean;
   model: string;
   candidatesEvaluated: number;
+  notCovered?: boolean;
+  notCoveredMessage?: string;
 }
 
 // ── Helper: latest price per distributor for a set of product IDs ──────────
@@ -129,7 +136,7 @@ async function getLatestPricesForProducts(
   return map;
 }
 
-// ── Helper: candidate retrieval by price band + keyword overlap ────────────
+// ── Helper: candidate retrieval by price band + OR-group keyword overlap ───
 
 async function getCandidates(opts: {
   sourceBrand: string;
@@ -141,19 +148,29 @@ async function getCandidates(opts: {
   const priceLow = opts.refPrice * PRICE_BAND_LOW;
   const priceHigh = opts.refPrice * PRICE_BAND_HIGH;
 
-  // Build keyword array from source description for overlap scoring.
-  // Simple word tokenisation — strip punctuation, lower, unique words ≥4 chars.
-  const keywords = [...new Set(
-    opts.sourceDescription
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 4),
-  )].slice(0, 30);
+  // Build token OR-groups from source description.
+  // Each group contains synonym variants; a group is "matched" when ANY variant
+  // appears in the candidate description. Overlap score = distinct groups matched.
+  const tokenGroups = buildTokenGroups(opts.sourceDescription);
 
-  const kwArray = keywords.length > 0
-    ? sql.raw(`ARRAY[${keywords.map((k) => `'${k.replace(/'/g, "''")}'`).join(",")}]::text[]`)
-    : sql.raw(`ARRAY[]::text[]`);
+  // Flatten to (group_id, variant) pairs for the SQL VALUES clause.
+  const gvPairs = tokenGroups.flatMap((g) =>
+    g.variants.map((v) => ({ gid: g.groupId, v })),
+  );
+
+  // SQL expression: count how many distinct token groups matched.
+  // Falls back to literal 0 when no tokens were extracted.
+  const overlapExpr =
+    gvPairs.length > 0
+      ? sql`(
+          SELECT COUNT(DISTINCT gv.gid)::int
+          FROM (VALUES ${sql.join(
+            gvPairs.map((p) => sql`(${p.gid}::int, ${p.v})`),
+            sql`, `,
+          )}) AS gv(gid, variant)
+          WHERE LOWER(p.description) LIKE '%' || gv.variant || '%'
+        )`
+      : sql.raw(`0`);
 
   // Distinctive-token boosts: rank within each brand's cap by form-factor and
   // CPU family match so that e.g. HP SFF i7 desktops beat HP keyboards/monitors
@@ -203,11 +220,7 @@ async function getCandidates(opts: {
         p.vpn_display,
         p.description,
         latest.sell_price AS latest_price,
-        (
-          SELECT COUNT(*)
-          FROM UNNEST(${kwArray}) AS kw
-          WHERE LOWER(p.description) LIKE '%' || kw || '%'
-        ) AS keyword_overlap,
+        (${overlapExpr}) AS keyword_overlap,
         (${ffBoostExpr}) AS ff_boost,
         (${cpuBoostExpr}) AS cpu_boost
       FROM products p
@@ -308,6 +321,10 @@ async function runPipeline(opts: {
     return { ...cached, cached: true };
   }
 
+  // Detect component class hint before retrieval — used in both the empty-pool
+  // and zero-match branches to produce a "not covered" response.
+  const classHint = detectClassHint(opts.sourceDescription);
+
   // Candidate retrieval
   const candidates = await getCandidates({
     sourceBrand: opts.sourceBrand ?? "__NONE__",
@@ -330,6 +347,7 @@ async function runPipeline(opts: {
       cached: false,
       model: LLM_MODEL,
       candidatesEvaluated: 0,
+      ...(classHint ? { notCovered: true, notCoveredMessage: NOT_COVERED_MSG } : {}),
     };
     await putCache({ productId: opts.productId, queryHash: opts.queryHash, requestSummary: opts.requestSummary, response: empty });
     return empty;
@@ -345,7 +363,12 @@ async function runPipeline(opts: {
     vpnDisplay: c.vpnDisplay,
   }));
 
-  const judgeResult = await callLlmJudge(opts.sourceDescription, llmCandidates);
+  const judgeResult = await callLlmJudge(
+    opts.sourceDescription,
+    llmCandidates,
+    120,
+    classHint,
+  );
 
   // Map indices back to real products
   const priceMap = await getLatestPricesForProducts(candidates.map((c) => c.productId));
@@ -381,6 +404,9 @@ async function runPipeline(opts: {
     cached: false,
     model: LLM_MODEL,
     candidatesEvaluated: candidates.length,
+    ...(classHint && matches.length === 0
+      ? { notCovered: true, notCoveredMessage: NOT_COVERED_MSG }
+      : {}),
   };
 
   await putCache({ productId: opts.productId, queryHash: opts.queryHash, requestSummary: opts.requestSummary, response: result });

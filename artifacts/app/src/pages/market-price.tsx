@@ -43,6 +43,8 @@ interface MarketPriceResult {
   cached: boolean;
   model: string;
   candidatesEvaluated: number;
+  notCovered?: boolean;
+  notCoveredMessage?: string;
 }
 
 interface ProductSuggestion {
@@ -469,8 +471,15 @@ export default function MarketPrice() {
           <SourceCard source={result.source} />
 
           {result.matches.length === 0 ? (
-            <div className="text-sm text-muted-foreground border border-border rounded-sm px-4 py-8 text-center bg-card">
-              No comparable products found in current feeds.
+            <div className="border border-border rounded-sm px-4 py-8 text-center bg-card space-y-1">
+              <div className="text-sm text-muted-foreground">
+                {result.notCoveredMessage ?? "No comparable products found in current feeds."}
+              </div>
+              {result.notCovered && (
+                <div className="text-xs text-muted-foreground/60 italic">
+                  Try searching for a specific product SKU using the &quot;By SKU&quot; tab, or broaden the spec.
+                </div>
+              )}
             </div>
           ) : (
             <ResultsTable result={result} />
