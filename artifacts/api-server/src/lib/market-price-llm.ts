@@ -485,9 +485,19 @@ export async function callLlmJudge(
       },
       { signal: controller.signal },
     );
-    const block = response.content[0];
-    rawText = block.type === "text" ? block.text : "";
     stopReason = response.stop_reason;
+    const textBlocks = response.content.filter((b) => b.type === "text");
+    if (textBlocks.length === 0) {
+      logger.warn(
+        {
+          blockTypes: response.content.map((b) => b.type),
+          stopReason,
+          model: LLM_MODEL,
+        },
+        "LLM response contained no text blocks",
+      );
+    }
+    rawText = textBlocks.map((b) => (b as { type: "text"; text: string }).text).join("\n").trim();
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new LlmUnavailableError("Matching service timed out after 60s");

@@ -69,6 +69,39 @@ describe("extractJsonFromLlmText", () => {
   });
 });
 
+// ── content-block extraction (thinking + text) ────────────────────────────
+
+describe("content-block text extraction", () => {
+  it("joins all text blocks when the first block is a thinking block", () => {
+    // Simulate: response.content = [{type:"thinking",...},{type:"text",text:"..."}]
+    // The fix filters to text blocks and joins; extractJsonFromLlmText then parses.
+    const textBlocks = [{ type: "thinking", thinking: "Let me analyse..." }, { type: "text", text: '{"matches":[{"index":1,"similarity":"close","reason":"identical spec"}]}' }];
+    const rawText = textBlocks
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("\n")
+      .trim();
+    expect(rawText).toBe('{"matches":[{"index":1,"similarity":"close","reason":"identical spec"}]}');
+    const parsed = extractJsonFromLlmText(rawText) as { matches: unknown[] };
+    expect(parsed.matches).toHaveLength(1);
+  });
+
+  it("joins multiple text blocks into one string before parsing", () => {
+    const textBlocks = [
+      { type: "text", text: '{"matches":[{"index":0,"similarity":"close","reason":"same tier"},' },
+      { type: "text", text: '{"index":1,"similarity":"partial","reason":"lower tier"}]}' },
+    ];
+    const rawText = textBlocks
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
+      .join("\n")
+      .trim();
+    // The joined string should be parseable via bracket extraction
+    const parsed = extractJsonFromLlmText(rawText) as { matches: unknown[] };
+    expect(parsed.matches).toHaveLength(2);
+  });
+});
+
 // ── makeQueryHash ──────────────────────────────────────────────────────────
 
 describe("makeQueryHash", () => {
