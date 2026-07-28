@@ -288,6 +288,14 @@ export interface ComparisonRow {
   dickerIsMostExpensive: boolean;
 }
 
+export type ComparisonResultFreshnessWarningsItem = {
+  distributorId: number;
+  distributorName: string;
+  latestUploadDate: string;
+  /** @nullable */
+  fallbackDate: string | null;
+};
+
 export interface ComparisonResult {
   rows: ComparisonRow[];
   distributors: Distributor[];
@@ -296,6 +304,7 @@ export interface ComparisonResult {
   page?: number | null;
   /** @nullable */
   pageSize?: number | null;
+  freshnessWarnings?: ComparisonResultFreshnessWarningsItem[];
 }
 
 export type DistributorCardFreshness = typeof DistributorCardFreshness[keyof typeof DistributorCardFreshness];

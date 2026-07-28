@@ -439,10 +439,23 @@ async function commitRowsBatched(
     .filter((v): v is NonNullable<typeof v> => v !== null);
 
   // Replace semantics wrapped in a single transaction:
-  // delete existing snapshots for this distributor + date, then insert the new batch.
+  // 1. Mark any prior committed uploads for this distributor+date as superseded.
+  // 2. Delete existing snapshots for this distributor + date.
+  // 3. Insert the new batch.
   // Product upserts above intentionally remain outside — they are idempotent and
   // safe to run before the transaction opens.
   await db.transaction(async (tx) => {
+    // Flip prior committed uploads for this slot to superseded before deleting their rows.
+    // The current upload still has status='parsing' at this point, so this UPDATE
+    // only touches uploads that were previously committed for this distributor+date.
+    await tx.update(uploadsTable)
+      .set({ status: "superseded" })
+      .where(and(
+        eq(uploadsTable.distributorId, distId),
+        eq(uploadsTable.snapshotDate, snapshotDate),
+        eq(uploadsTable.status, "committed"),
+      ));
+
     await tx.delete(stockSnapshotsTable)
       .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
 
@@ -619,6 +632,12 @@ router.post("/uploads/commit", requireElevatedRole, async (req, res): Promise<vo
     brandMap,
   );
 
+  if (committed === 0) {
+    await db.update(uploadsTable).set({ status: "failed_empty", rowCountMatched: 0 }).where(eq(uploadsTable.id, uploadRecord.id));
+    res.status(422).json({ error: "No rows matched tracked brands — nothing was imported." });
+    return;
+  }
+
   await db.update(uploadsTable).set({
     rowCountMatched: committed,
     status: "committed",
@@ -783,6 +802,12 @@ router.post("/uploads/commit-direct", requireElevatedRole, express.json({ limit:
     effectiveSnapshotDate,
     brandMap,
   );
+
+  if (committed === 0) {
+    await db.update(uploadsTable).set({ status: "failed_empty", rowCountMatched: 0 }).where(eq(uploadsTable.id, uploadRecord.id));
+    res.status(422).json({ error: "No rows matched tracked brands — nothing was imported." });
+    return;
+  }
 
   await db.update(uploadsTable).set({ rowCountMatched: committed, status: "committed" }).where(eq(uploadsTable.id, uploadRecord.id));
 

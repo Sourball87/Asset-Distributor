@@ -19,6 +19,7 @@ export * from './columnMapping';
 export * from './commitUploadInput';
 export * from './commitUploadInputSourceFormat';
 export * from './comparisonResult';
+export * from './comparisonResultFreshnessWarningsItem';
 export * from './comparisonRow';
 export * from './dashboardSummary';
 export * from './distributor';

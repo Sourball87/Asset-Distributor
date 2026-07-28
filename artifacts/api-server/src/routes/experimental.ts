@@ -191,7 +191,11 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
     const [dickerLatestUpload] = baselineDistId != null
       ? await db.select({ snapshotDate: uploadsTable.snapshotDate })
           .from(uploadsTable)
-          .where(and(eq(uploadsTable.distributorId, baselineDistId), eq(uploadsTable.status, "committed")))
+          .where(and(
+            eq(uploadsTable.distributorId, baselineDistId),
+            eq(uploadsTable.status, "committed"),
+            sql`EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = ${uploadsTable.id})`,
+          ))
           .orderBy(desc(uploadsTable.snapshotDate))
           .limit(1)
       : [];

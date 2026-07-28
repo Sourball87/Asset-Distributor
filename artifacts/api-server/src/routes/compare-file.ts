@@ -73,6 +73,7 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   const freshnessResult = await db.execute(sql`
     SELECT distributor_id, MAX(snapshot_date) AS last_date
     FROM uploads WHERE status = 'committed'
+      AND EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = uploads.id)
     GROUP BY distributor_id
   `);
   const freshnessMap = new Map<number, string>();

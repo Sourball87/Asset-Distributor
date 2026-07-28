@@ -531,7 +531,13 @@ export const GetComparisonResponse = zod.object({
 })),
   "total": zod.number(),
   "page": zod.number().nullish(),
-  "pageSize": zod.number().nullish()
+  "pageSize": zod.number().nullish(),
+  "freshnessWarnings": zod.array(zod.object({
+  "distributorId": zod.number(),
+  "distributorName": zod.string(),
+  "latestUploadDate": zod.string(),
+  "fallbackDate": zod.string().nullable()
+})).optional()
 })
 
 

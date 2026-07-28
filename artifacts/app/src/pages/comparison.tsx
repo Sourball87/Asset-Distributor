@@ -6,6 +6,7 @@ import {
   useGetComparison,
   useListBrands,
   type ComparisonRow,
+  type ComparisonResult,
   type Distributor,
 } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, FileDown, ChevronDown } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2, AlertCircle, AlertTriangle, FileDown, ChevronDown, X } from "lucide-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -293,9 +295,23 @@ export default function Comparison() {
     return Object.keys(p).length ? p : undefined;
   }, [brandFilter, searchParam, showStaleRows]);
 
+  const [dismissedWarnings, setDismissedWarnings] = useState<Set<number>>(new Set());
+
   const { data, isLoading, isError } = useGetComparison(queryParams, {
     query: { staleTime: 60_000, queryKey: ["comparison", queryParams] },
   });
+
+  // Clear dismissed warnings when data refreshes (new distributors may have different state)
+  useEffect(() => {
+    setDismissedWarnings(new Set());
+  }, [data]);
+
+  const freshnessWarnings = useMemo(
+    () => ((data as ComparisonResult | undefined)?.freshnessWarnings ?? []).filter(
+      (w) => !dismissedWarnings.has(w.distributorId),
+    ),
+    [data, dismissedWarnings],
+  );
 
   const distributors: Distributor[] = useMemo(() => data?.distributors ?? [], [data]);
 
@@ -503,6 +519,32 @@ export default function Comparison() {
         <div className="flex items-center gap-2 text-sm text-red-600 border border-red-200 bg-red-50 rounded-sm px-3 py-2 shrink-0">
           <AlertCircle className="h-4 w-4 shrink-0" />
           Failed to load comparison data.
+        </div>
+      )}
+
+      {/* Freshness warnings — shown when a distributor's newest committed upload has no rows */}
+      {freshnessWarnings.length > 0 && (
+        <div className="space-y-1 shrink-0">
+          {freshnessWarnings.map((w) => (
+            <Alert key={w.distributorId} className="py-2 px-3 border-amber-300 bg-amber-50 text-amber-900 rounded-sm">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+              <AlertDescription className="text-xs flex items-center justify-between gap-2">
+                <span>
+                  <strong>{w.distributorName}'s</strong> latest upload ({fmtDateDDMMYYYY(w.latestUploadDate)}) contains no data —{" "}
+                  {w.fallbackDate
+                    ? <>showing <strong>{fmtDateDDMMYYYY(w.fallbackDate)}</strong> prices instead.</>
+                    : "no price data available."}
+                </span>
+                <button
+                  onClick={() => setDismissedWarnings((prev) => new Set([...prev, w.distributorId]))}
+                  className="shrink-0 text-amber-600 hover:text-amber-900 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </AlertDescription>
+            </Alert>
+          ))}
         </div>
       )}
 

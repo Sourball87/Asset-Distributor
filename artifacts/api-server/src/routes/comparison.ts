@@ -43,6 +43,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
         SELECT distributor_id, MAX(snapshot_date) AS current_date
         FROM uploads
         WHERE status = 'committed'
+          AND EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = uploads.id)
         GROUP BY distributor_id
       ),
       filtered_products AS (
@@ -124,13 +125,19 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     staleness_threshold_days: number;
     created_at: Date;
     latest_upload_date: string | null;
+    latest_upload_date_with_rows: string | null;
   };
   const { rows: distRows } = await pool.query<DistRow>(`
     SELECT d.id, d.name, d.is_baseline, d.staleness_threshold_days, d.created_at,
       (SELECT MAX(u.snapshot_date)::text
        FROM uploads u
        WHERE u.distributor_id = d.id AND u.status = 'committed'
-      ) AS latest_upload_date
+      ) AS latest_upload_date,
+      (SELECT MAX(u.snapshot_date)::text
+       FROM uploads u
+       WHERE u.distributor_id = d.id AND u.status = 'committed'
+         AND EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = u.id)
+      ) AS latest_upload_date_with_rows
     FROM distributors d
     ORDER BY d.is_baseline DESC, d.name
   `);
@@ -208,6 +215,20 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     };
   });
 
+  // Build freshness warnings: distributors whose newest committed upload has no rows,
+  // so the anchor fell back to an older date.
+  const freshnessWarnings = distRows
+    .filter((d) =>
+      d.latest_upload_date != null &&
+      d.latest_upload_date !== d.latest_upload_date_with_rows,
+    )
+    .map((d) => ({
+      distributorId:    d.id,
+      distributorName:  d.name,
+      latestUploadDate: d.latest_upload_date!,
+      fallbackDate:     d.latest_upload_date_with_rows ?? null,
+    }));
+
   res.json({
     rows: comparisonRows,
     distributors: distRows.map((d) => ({
@@ -223,6 +244,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     total:    totalCount,
     page,
     pageSize: pageSize || null,
+    freshnessWarnings,
   });
 });
 

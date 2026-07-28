@@ -1320,6 +1320,20 @@ components:
           type: ["integer", "null"]
         pageSize:
           type: ["integer", "null"]
+        freshnessWarnings:
+          type: array
+          items:
+            type: object
+            required: [distributorId, distributorName, latestUploadDate, fallbackDate]
+            properties:
+              distributorId:
+                type: integer
+              distributorName:
+                type: string
+              latestUploadDate:
+                type: string
+              fallbackDate:
+                type: ["string", "null"]
 
     # --- Dashboard ---
     DistributorCard:

@@ -137,11 +137,27 @@ router.post("/admin/users/:id/reset-password", async (req, res): Promise<void> =
   res.json({ temporaryPassword });
 });
 
+// ── GET /admin/maintenance/purge-status ──────────────────────────────────────
+// Returns whether the maintenance purge endpoint is currently enabled.
+// The UI uses this to show or hide the Database Maintenance section.
+router.get("/admin/maintenance/purge-status", async (req, res): Promise<void> => {
+  res.json({ enabled: process.env.ENABLE_MAINTENANCE_PURGE === "true" });
+});
+
 // ── POST /admin/maintenance/purge-upload ─────────────────────────────────────
 // Purges all stock_snapshots for a given upload_id, deletes any products that
 // become orphaned (no remaining snapshots), and marks the upload invalid.
+// Requires ENABLE_MAINTENANCE_PURGE=true in the environment.
+// Creates point-in-time backup tables before deleting anything.
 // Use dryRun=true (default) to inspect impact before committing.
 router.post("/admin/maintenance/purge-upload", async (req, res): Promise<void> => {
+  if (process.env.ENABLE_MAINTENANCE_PURGE !== "true") {
+    res.status(403).json({
+      error: "Maintenance purge is disabled. Set ENABLE_MAINTENANCE_PURGE=true to enable it, then disable it again after use.",
+    });
+    return;
+  }
+
   const { uploadId, dryRun = true } = req.body as { uploadId: number; dryRun?: boolean };
 
   if (!uploadId || isNaN(Number(uploadId))) {
@@ -205,6 +221,29 @@ router.post("/admin/maintenance/purge-upload", async (req, res): Promise<void> =
   try {
     await client.query("BEGIN");
 
+    // Create point-in-time backup tables before any deletion.
+    // Table names embed the upload ID and a yyyymmddhhmm timestamp so they are
+    // unique and identifiable; they persist after the transaction for recovery.
+    const ts = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 12); // yyyymmddhhmm
+    const snapsBackupTable    = `stock_snapshots_purge_backup_${id}_${ts}`;
+    const productsBackupTable = `products_purge_backup_${id}_${ts}`;
+
+    await client.query(
+      `CREATE TABLE ${snapsBackupTable} AS SELECT * FROM stock_snapshots WHERE upload_id = $1`,
+      [id],
+    );
+
+    await client.query(`
+      CREATE TABLE ${productsBackupTable} AS
+      SELECT p.* FROM products p
+      WHERE p.id IN (
+        SELECT DISTINCT ss.product_id FROM stock_snapshots ss WHERE ss.upload_id = $1
+      )
+      AND p.id NOT IN (
+        SELECT DISTINCT ss2.product_id FROM stock_snapshots ss2 WHERE ss2.upload_id != $1
+      )
+    `, [id]);
+
     const { rowCount: deletedSnaps } = await client.query(
       `DELETE FROM stock_snapshots WHERE upload_id = $1`,
       [id],
@@ -256,6 +295,7 @@ router.post("/admin/maintenance/purge-upload", async (req, res): Promise<void> =
         deletedOrphanProducts: deletedProducts,
         uploadMarkedInvalid: true,
         verified: { remainingSnapshotsForUpload: 0, productsWithZeroSnapshots: 0 },
+        backupTables: { snapshots: snapsBackupTable, products: productsBackupTable },
       },
     });
   } catch (err) {

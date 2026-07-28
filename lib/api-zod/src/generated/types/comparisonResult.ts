@@ -5,6 +5,7 @@
  * Distributor Pricing & Stock Comparison API
  * OpenAPI spec version: 0.1.0
  */
+import type { ComparisonResultFreshnessWarningsItem } from './comparisonResultFreshnessWarningsItem';
 import type { ComparisonRow } from './comparisonRow';
 import type { Distributor } from './distributor';
 
@@ -16,4 +17,5 @@ export interface ComparisonResult {
   page?: number | null;
   /** @nullable */
   pageSize?: number | null;
+  freshnessWarnings?: ComparisonResultFreshnessWarningsItem[];
 }

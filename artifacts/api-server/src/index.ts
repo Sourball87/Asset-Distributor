@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { seedIfEmpty } from "./lib/seed";
 import { migrateVpnNormalization } from "./lib/migrate-vpn-normalization";
+import { migrateSuperseededBackfill } from "./lib/migrate-superseded-backfill";
 
 const rawPort = process.env["PORT"];
 
@@ -28,9 +29,13 @@ seedIfEmpty().catch((err) => {
 try {
   await migrateVpnNormalization();
 } catch (err) {
-  // Log and continue — a failed migration must not prevent the server from
-  // starting; the grid will show duplicates but data will not be corrupted.
   logger.error({ err }, "VPN normalization migration failed — server starting anyway");
+}
+
+try {
+  await migrateSuperseededBackfill();
+} catch (err) {
+  logger.error({ err }, "Superseded backfill migration failed — server starting anyway");
 }
 
 app.listen(port, (err) => {

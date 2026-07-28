@@ -12,6 +12,7 @@ A web application for product managers at an IT distributor to benchmark pricing
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
 - Required env: `SESSION_SECRET` — session signing secret
+- Optional env: `ENABLE_MAINTENANCE_PURGE` — see Database Maintenance below
 
 ## Stack
 
@@ -89,12 +90,43 @@ A web application for product managers at an IT distributor to benchmark pricing
 - Zebra striping on tables, compact row heights
 - No emojis in UI
 
+## Database Maintenance
+
+### Purge endpoint (`POST /api/admin/maintenance/purge-upload`)
+
+This endpoint permanently deletes all stock snapshots for a given upload ID, removes any products that become fully orphaned, and marks the upload `invalid_mapping`. It is **disabled by default** in all environments.
+
+**To enable:**
+1. Set `ENABLE_MAINTENANCE_PURGE=true` in Replit Secrets (Settings → Secrets).
+2. The "Database Maintenance" section will appear in Settings → Users for admin accounts.
+3. Always run Dry Run first to confirm impact before committing the purge.
+4. **Disable immediately after use** — remove or set `ENABLE_MAINTENANCE_PURGE=false`. The section disappears from the UI and the route returns 403.
+
+The endpoint creates two point-in-time backup tables before deleting anything:
+- `stock_snapshots_purge_backup_{uploadId}_{yyyymmddhhmm}`
+- `products_purge_backup_{uploadId}_{yyyymmddhhmm}`
+
+Both tables persist after the purge and must be dropped manually once recovery is no longer needed.
+
+### Upload status values
+
+| Status | Meaning |
+|---|---|
+| `parsing` | Upload record created; commit in progress |
+| `committed` | Successfully committed; snapshot rows are live |
+| `superseded` | A later upload for the same distributor+date replaced this one's rows |
+| `failed_empty` | Commit completed but zero rows matched tracked brands |
+| `failed` | Legacy failure status |
+| `invalid_mapping` | Manually invalidated via purge endpoint |
+
 ## Gotchas
 
 - After adding new schema files to `lib/db/src/schema/`, run `pnpm run typecheck:libs` before typechecking artifacts — stale lib declarations cause false-positive TS2305 errors.
 - `pnpm --filter @workspace/db run push` must be run after any schema changes before the API server will work correctly.
 - The brand alias matching is case+whitespace insensitive. Canonical names are stored UPPERCASE in the DB.
 - `connect-pg-simple` creates the `user_sessions` table automatically on first startup (`createTableIfMissing: true`).
+- The uploads `status` column is plain `text` (no PostgreSQL check constraint) — new status values require only a Drizzle schema update and TypeScript rebuild, not a DB migration.
+- The freshness anchor in `comparison.ts`, `insights.ts`, `experimental.ts`, and `compare-file.ts` uses `AND EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = uploads.id)` to exclude empty committed uploads from the current-date calculation. The comparison endpoint returns `freshnessWarnings` when this fallback is triggered.
 
 ## Pointers
 

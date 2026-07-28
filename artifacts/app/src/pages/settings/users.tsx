@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useListAdminUsers,
   getListAdminUsersQueryKey,
@@ -344,6 +344,7 @@ type PurgeResult = {
   deletedSnapshots: number;
   deletedOrphanProducts: number;
   uploadMarkedInvalid: boolean;
+  backupTables?: { snapshots: string; products: string };
 };
 
 type PurgeResponse =
@@ -352,10 +353,23 @@ type PurgeResponse =
   | { error: string };
 
 function DatabaseMaintenance() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   const [uploadId, setUploadId]         = useState("");
   const [loading, setLoading]           = useState(false);
   const [response, setResponse]         = useState<PurgeResponse | null>(null);
   const [confirming, setConfirming]     = useState(false);
+
+  // Check whether the purge endpoint is enabled on mount.
+  // When ENABLE_MAINTENANCE_PURGE is not set the section is hidden entirely.
+  useEffect(() => {
+    fetch("/api/admin/maintenance/purge-status", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: { enabled: boolean }) => setEnabled(d.enabled))
+      .catch(() => setEnabled(false));
+  }, []);
+
+  if (enabled === null) return null; // still loading
+  if (!enabled) return null;        // feature flag not set — hide section
 
   async function call(dryRun: boolean) {
     const id = uploadId.trim();

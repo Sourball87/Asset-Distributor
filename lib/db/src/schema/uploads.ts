@@ -13,7 +13,7 @@ export const uploadsTable = pgTable("uploads", {
   rowCountTotal: integer("row_count_total").notNull().default(0),
   rowCountMatched: integer("row_count_matched").notNull().default(0),
   uploadedBy: integer("uploaded_by").references(() => usersTable.id, { onDelete: "set null" }),
-  status: text("status", { enum: ["parsing", "mapped", "committed", "failed"] }).notNull().default("parsing"),
+  status: text("status", { enum: ["parsing", "mapped", "committed", "failed", "failed_empty", "superseded", "invalid_mapping"] }).notNull().default("parsing"),
 });
 
 export const insertUploadSchema = createInsertSchema(uploadsTable).omit({ id: true, uploadedAt: true });
