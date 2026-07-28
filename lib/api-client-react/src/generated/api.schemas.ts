@@ -92,6 +92,11 @@ export interface Distributor {
   lastUploadAt?: string | null;
   /** @nullable */
   lastUploadStatus?: string | null;
+  /**
+     * ISO date of the most recent committed upload; used as the isCurrent anchor.
+     * @nullable
+     */
+  latestUploadDate?: string | null;
 }
 
 export interface DistributorInput {
@@ -253,6 +258,13 @@ export interface DistributorStockEntry {
   soh?: number | null;
   /** @nullable */
   soo?: number | null;
+  /**
+     * ISO date of the snapshot this entry is drawn from; null when the distributor has no data for this product.
+     * @nullable
+     */
+  snapshotDate?: string | null;
+  /** True when snapshotDate equals or exceeds the distributor's most recent committed upload date. */
+  isCurrent?: boolean;
   /** @nullable */
   movement?: number | null;
   /** @nullable */

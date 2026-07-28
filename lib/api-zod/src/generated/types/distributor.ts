@@ -16,4 +16,9 @@ export interface Distributor {
   lastUploadAt?: string | null;
   /** @nullable */
   lastUploadStatus?: string | null;
+  /**
+     * ISO date of the most recent committed upload; used as the isCurrent anchor.
+     * @nullable
+     */
+  latestUploadDate?: string | null;
 }

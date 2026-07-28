@@ -42,7 +42,8 @@ function buildSharedCtes(): string {
     ),
     current_upload AS (
       SELECT distributor_id, MAX(snapshot_date) AS current_date
-      FROM stock_snapshots
+      FROM uploads
+      WHERE status = 'committed'
       GROUP BY distributor_id
     ),
     current_ss AS (

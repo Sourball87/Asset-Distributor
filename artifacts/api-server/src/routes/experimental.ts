@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, stockSnapshotsTable, productsTable, distributorsTable, brandsTable } from "@workspace/db";
-import { eq, and, gte, ilike, inArray, sql } from "drizzle-orm";
+import { db, stockSnapshotsTable, productsTable, distributorsTable, brandsTable, uploadsTable } from "@workspace/db";
+import { eq, and, gte, ilike, inArray, sql, desc } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { classifyMovement } from "../lib/movement-classifier";
 
@@ -185,6 +185,18 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       .from(distributorsTable)
       .where(eq(distributorsTable.isBaseline, true));
     const baselineDistId = baseline?.id ?? null;
+
+    // Dicker's latest committed upload date — used to determine if a product's
+    // snapshot is current (i.e. Dicker still carries it in their active feed).
+    const [dickerLatestUpload] = baselineDistId != null
+      ? await db.select({ snapshotDate: uploadsTable.snapshotDate })
+          .from(uploadsTable)
+          .where(and(eq(uploadsTable.distributorId, baselineDistId), eq(uploadsTable.status, "committed")))
+          .orderBy(desc(uploadsTable.snapshotDate))
+          .limit(1)
+      : [];
+    const dickerCurrentDate: string | null =
+      dickerLatestUpload?.snapshotDate ?? null;
 
     // Fixed 30-day look-back window
     const cutoff = new Date();
@@ -469,12 +481,12 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
       ORDER BY ss.product_id, ss.snapshot_date ASC
     `);
 
-    // Dicker Data latest SOH per product in this page (for dickerStatus)
-    type DickerRow = { product_id: string; latest_soh: string | null };
+    // Dicker Data latest SOH + snapshot_date per product in this page (for dickerStatus)
+    type DickerRow = { product_id: string; latest_soh: string | null; snapshot_date: string | null };
     const dickerRows = baselineDistId != null
       ? await db.execute<DickerRow>(sql`
           SELECT DISTINCT ON (product_id)
-            product_id, soh AS latest_soh
+            product_id, soh AS latest_soh, snapshot_date
           FROM stock_snapshots
           WHERE distributor_id = ${baselineDistId}
             AND product_id = ANY(${sql`ARRAY[${sql.join(productIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})
@@ -482,7 +494,7 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         `)
       : { rows: [] as DickerRow[] };
     const dickerByProduct = new Map(
-      dickerRows.rows.map((r) => [parseInt(String(r.product_id), 10), r.latest_soh]),
+      dickerRows.rows.map((r) => [parseInt(String(r.product_id), 10), r]),
     );
 
     // Group snapshots by product
@@ -534,11 +546,17 @@ router.get("/experimental/movement", requireAdmin, async (req, res) => {
         const soldOut = latestSoh === 0 && estUnitsSold > 0;
 
         // Dicker status: stocked / listed / not carried
-        const dickerLatestSoh = dickerByProduct.get(pid);
+        // "not carried" when Dicker has no snapshot or the snapshot is from an older
+        // upload (i.e. the product is absent from their current feed).
+        const dickerRow = dickerByProduct.get(pid);
+        const dickerIsCurrent =
+          dickerCurrentDate != null && dickerRow?.snapshot_date != null
+            ? String(dickerRow.snapshot_date) >= String(dickerCurrentDate)
+            : false;
         const dickerStatus: "stocked" | "listed" | "not carried" =
-          dickerLatestSoh === undefined
+          dickerRow === undefined || !dickerIsCurrent
             ? "not carried"
-            : dickerLatestSoh != null && parseInt(String(dickerLatestSoh), 10) > 0
+            : dickerRow.latest_soh != null && parseInt(String(dickerRow.latest_soh), 10) > 0
             ? "stocked"
             : "listed";
 

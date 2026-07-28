@@ -1028,6 +1028,9 @@ components:
           type: ["string", "null"]
         lastUploadStatus:
           type: ["string", "null"]
+        latestUploadDate:
+          type: ["string", "null"]
+          description: ISO date of the most recent committed upload; used as the isCurrent anchor.
 
     DistributorInput:
       type: object
@@ -1259,6 +1262,12 @@ components:
           type: ["integer", "null"]
         soo:
           type: ["integer", "null"]
+        snapshotDate:
+          type: ["string", "null"]
+          description: ISO date of the snapshot this entry is drawn from; null when the distributor has no data for this product.
+        isCurrent:
+          type: boolean
+          description: True when snapshotDate equals or exceeds the distributor's most recent committed upload date.
         movement:
           type: ["integer", "null"]
         movementSinceDate:

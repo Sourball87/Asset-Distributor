@@ -26,7 +26,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Trash2, CheckCircle, XCircle, KeyRound, Copy, Check } from "lucide-react";
+import { Trash2, CheckCircle, XCircle, KeyRound, Copy, Check, Loader2, ShieldAlert } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 
@@ -290,6 +291,9 @@ export default function UsersSettings() {
         </div>
       </div>
 
+      {/* Database Maintenance (admin only) */}
+      <DatabaseMaintenance />
+
       {/* Reset password result dialog */}
       <Dialog open={!!resetResult} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
         <DialogContent className="max-w-sm">
@@ -318,6 +322,147 @@ export default function UsersSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ── Database Maintenance ─────────────────────────────────────────────────────
+// Admin-only section for purging invalid uploads from the database.
+// Uses plain fetch (not the generated client) since this is a one-off operation.
+
+type PurgePreview = {
+  uploadId: number;
+  snapshotDate: string;
+  currentStatus: string;
+  rowCountTotal: number;
+  rowCountMatched: number;
+  snapshotsToDelete: number;
+  orphanProductsToDelete: number;
+};
+
+type PurgeResult = {
+  deletedSnapshots: number;
+  deletedOrphanProducts: number;
+  uploadMarkedInvalid: boolean;
+};
+
+type PurgeResponse =
+  | { dryRun: true;  preflight: PurgePreview }
+  | { dryRun: false; preflight: PurgePreview; result: PurgeResult }
+  | { error: string };
+
+function DatabaseMaintenance() {
+  const [uploadId, setUploadId]         = useState("");
+  const [loading, setLoading]           = useState(false);
+  const [response, setResponse]         = useState<PurgeResponse | null>(null);
+  const [confirming, setConfirming]     = useState(false);
+
+  async function call(dryRun: boolean) {
+    const id = uploadId.trim();
+    if (!id || isNaN(Number(id))) return;
+    setLoading(true);
+    setResponse(null);
+    setConfirming(false);
+    try {
+      const resp = await fetch("/api/admin/maintenance/purge-upload", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uploadId: Number(id), dryRun }),
+      });
+      const json: PurgeResponse = await resp.json();
+      setResponse(json);
+    } catch {
+      setResponse({ error: "Network error — check console" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const preview = response && !("error" in response) ? response.preflight : null;
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+        Database Maintenance
+      </h2>
+      <div className="border border-border rounded-sm bg-card p-4 space-y-4">
+        <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">
+          <ShieldAlert className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            <strong>Purge upload</strong> — deletes all stock snapshots for an upload, removes orphaned
+            products, and marks the upload <code>invalid_mapping</code>. Use Dry Run first.
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Input
+            value={uploadId}
+            onChange={(e) => { setUploadId(e.target.value); setResponse(null); setConfirming(false); }}
+            placeholder="Upload ID"
+            className="w-36 h-8 text-xs font-mono rounded-sm"
+            type="number"
+            min={1}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs rounded-sm"
+            onClick={() => call(true)}
+            disabled={loading || !uploadId}
+          >
+            {loading && !confirming ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Dry Run
+          </Button>
+          {preview && !confirming && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 text-xs rounded-sm"
+              onClick={() => setConfirming(true)}
+            >
+              Confirm Purge…
+            </Button>
+          )}
+          {confirming && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 text-xs rounded-sm animate-pulse"
+              onClick={() => call(false)}
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Yes, purge upload {uploadId}
+            </Button>
+          )}
+        </div>
+
+        {/* Results */}
+        {response && "error" in response && (
+          <p className="text-xs text-red-600 font-mono">{response.error}</p>
+        )}
+        {preview && (
+          <div className="rounded-sm border border-border bg-muted/30 p-3 text-xs font-mono space-y-1">
+            <p className="font-semibold text-foreground mb-1">
+              {response && "result" in response ? "✅ Purge committed" : "🔎 Dry run preview"}
+            </p>
+            <p>Upload ID: <span className="text-foreground">{preview.uploadId}</span></p>
+            <p>Snapshot date: <span className="text-foreground">{preview.snapshotDate}</span></p>
+            <p>Current status: <span className="text-foreground">{preview.currentStatus}</span></p>
+            <p>Snapshots to delete: <span className="text-red-600 font-semibold">{preview.snapshotsToDelete.toLocaleString()}</span></p>
+            <p>Orphan products to delete: <span className="text-red-600 font-semibold">{preview.orphanProductsToDelete.toLocaleString()}</span></p>
+            {response && "result" in response && (
+              <>
+                <hr className="border-border my-1" />
+                <p>Snapshots deleted: <span className="text-foreground">{response.result.deletedSnapshots?.toLocaleString()}</span></p>
+                <p>Products deleted: <span className="text-foreground">{response.result.deletedOrphanProducts?.toLocaleString()}</span></p>
+                <p>Upload marked invalid: <span className="text-foreground">{response.result.uploadMarkedInvalid ? "yes" : "no"}</span></p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

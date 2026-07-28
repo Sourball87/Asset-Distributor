@@ -5,16 +5,19 @@ import { requireAuth } from "../middlewares/auth";
 const router = Router();
 
 router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
-  const brand    = (req.query.brand  as string | undefined)?.trim().toUpperCase() || null;
-  const search   = (req.query.search as string | undefined)?.trim() || null;
-  const page     = Math.max(1, parseInt((req.query.page     as string) ?? "1") || 1);
-  const pageSize = Math.max(0, parseInt((req.query.pageSize as string) ?? "0") || 0);
+  const brand     = (req.query.brand    as string | undefined)?.trim().toUpperCase() || null;
+  const search    = (req.query.search   as string | undefined)?.trim() || null;
+  const page      = Math.max(1, parseInt((req.query.page     as string) ?? "1") || 1);
+  const pageSize  = Math.max(0, parseInt((req.query.pageSize as string) ?? "0") || 0);
+  // showStale=true includes products where no distributor has a current snapshot.
+  // Default false: only products with at least one current distributor snapshot are returned.
+  const showStale = (req.query.showStale as string | undefined) === "true";
 
   const searchPattern = search ? `%${search}%` : null;
   const limitVal  = pageSize > 0 ? pageSize : null;   // null → LIMIT NULL → no cap
   const offsetVal = pageSize > 0 ? (page - 1) * pageSize : 0;
 
-  // ── Single CTE query ────────────────────────────────────────────────────
+  // ── Single CTE query ────────────────────────────────────────────────────────
   type QueryRow = {
     product_id:     number;
     vpn_normalized: string;
@@ -29,11 +32,19 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       sellPrice:       string | null;
       soh:             number | null;
       soo:             number | null;
+      snapshotDate:    string | null;
+      isCurrent:       boolean;
     }>;
   };
 
   const { rows } = await pool.query<QueryRow>(`
     WITH
+      distributor_current_dates AS (
+        SELECT distributor_id, MAX(snapshot_date) AS current_date
+        FROM uploads
+        WHERE status = 'committed'
+        GROUP BY distributor_id
+      ),
       filtered_products AS (
         SELECT p.id, p.vpn_normalized, p.vpn_display, p.brand, p.description
         FROM products p
@@ -43,6 +54,13 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
                p.vpn_normalized ILIKE $2
             OR p.vpn_display    ILIKE $2
             OR p.description    ILIKE $2
+          ))
+          AND ($5::boolean = true OR p.id IN (
+            SELECT DISTINCT ss2.product_id
+            FROM stock_snapshots ss2
+            JOIN distributor_current_dates dcd2
+              ON dcd2.distributor_id = ss2.distributor_id
+             AND ss2.snapshot_date  >= dcd2.current_date
           ))
       ),
       total AS (
@@ -80,34 +98,53 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
           'isBaseline',      d.is_baseline,
           'sellPrice',       l.sell_price,
           'soh',             l.soh,
-          'soo',             l.soo
+          'soo',             l.soo,
+          'snapshotDate',    l.snapshot_date,
+          'isCurrent',       (
+            l.snapshot_date IS NOT NULL
+            AND dcd.current_date IS NOT NULL
+            AND l.snapshot_date >= dcd.current_date
+          )
         ) ORDER BY d.is_baseline DESC, d.name
       ) AS distributor_data
     FROM paged_products pp
     CROSS JOIN distributors d
     LEFT JOIN latest_ss l ON l.product_id = pp.id AND l.distributor_id = d.id
+    LEFT JOIN distributor_current_dates dcd ON dcd.distributor_id = d.id
     CROSS JOIN total t
     GROUP BY pp.id, pp.vpn_normalized, pp.vpn_display, pp.brand, pp.description, t.cnt
     ORDER BY pp.brand, pp.vpn_normalized
-  `, [brand, searchPattern, limitVal, offsetVal]);
+  `, [brand, searchPattern, limitVal, offsetVal, showStale]);
 
-  // ── Distributor metadata (tiny table, fine as second query) ─────────────
-  type DistRow = { id: number; name: string; is_baseline: boolean; staleness_threshold_days: number; created_at: Date };
-  const { rows: distRows } = await pool.query<DistRow>(
-    `SELECT id, name, is_baseline, staleness_threshold_days, created_at
-     FROM distributors ORDER BY is_baseline DESC, name`,
-  );
+  // ── Distributor metadata with latest committed upload date ──────────────────
+  type DistRow = {
+    id: number;
+    name: string;
+    is_baseline: boolean;
+    staleness_threshold_days: number;
+    created_at: Date;
+    latest_upload_date: string | null;
+  };
+  const { rows: distRows } = await pool.query<DistRow>(`
+    SELECT d.id, d.name, d.is_baseline, d.staleness_threshold_days, d.created_at,
+      (SELECT MAX(u.snapshot_date)::text
+       FROM uploads u
+       WHERE u.distributor_id = d.id AND u.status = 'committed'
+      ) AS latest_upload_date
+    FROM distributors d
+    ORDER BY d.is_baseline DESC, d.name
+  `);
 
   const totalCount = rows.length > 0 ? rows[0].total_count : 0;
 
-  // ── Assemble response rows (cheap arithmetic only) ───────────────────────
+  // ── Assemble response rows (cheap arithmetic only) ──────────────────────────
   const comparisonRows = rows.map((row) => {
     const distData = row.distributor_data ?? [];
 
-    // Find baseline (Dicker) sell price — comes first because ORDER BY is_baseline DESC
+    // Find baseline (Dicker) sell price — only from a current snapshot
     let dickerPrice: number | null = null;
     for (const d of distData) {
-      if (d.isBaseline && d.sellPrice != null) {
+      if (d.isBaseline && d.sellPrice != null && d.isCurrent) {
         dickerPrice = Number(d.sellPrice);
         break;
       }
@@ -121,14 +158,16 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
 
       let priceDelta:    number | null = null;
       let priceDeltaPct: number | null = null;
-      if (!d.isBaseline && sellPrice != null && dickerPrice != null) {
+      // Only compute deltas when both sides are current
+      if (!d.isBaseline && d.isCurrent && sellPrice != null && dickerPrice != null) {
         priceDelta    = sellPrice - dickerPrice;
         priceDeltaPct = dickerPrice !== 0
           ? ((sellPrice - dickerPrice) / dickerPrice) * 100
           : null;
       }
 
-      if (!d.isBaseline && sellPrice != null) {
+      // Only current competitors count toward cheapest
+      if (!d.isBaseline && d.isCurrent && sellPrice != null) {
         if (cheapestCompetitorPrice == null || sellPrice < cheapestCompetitorPrice) {
           cheapestCompetitorPrice = sellPrice;
           cheapestCompetitorId   = d.distributorId;
@@ -142,6 +181,8 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
         sellPrice,
         soh:              d.soh,
         soo:              d.soo,
+        snapshotDate:     d.snapshotDate ?? null,
+        isCurrent:        d.isCurrent ?? false,
         movement:         null,
         movementSinceDate: null,
         isNew:            true,
@@ -177,6 +218,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       createdAt:              d.created_at.toISOString(),
       lastUploadAt:           null,
       lastUploadStatus:       null,
+      latestUploadDate:       d.latest_upload_date ?? null,
     })),
     total:    totalCount,
     page,

@@ -171,7 +171,8 @@ export const ListDistributorsResponseItem = zod.object({
   "stalenessThresholdDays": zod.number(),
   "createdAt": zod.string(),
   "lastUploadAt": zod.string().nullish(),
-  "lastUploadStatus": zod.string().nullish()
+  "lastUploadStatus": zod.string().nullish(),
+  "latestUploadDate": zod.string().nullish().describe('ISO date of the most recent committed upload; used as the isCurrent anchor.')
 })
 export const ListDistributorsResponse = zod.array(ListDistributorsResponseItem)
 
@@ -195,7 +196,8 @@ export const CreateDistributorResponse = zod.object({
   "stalenessThresholdDays": zod.number(),
   "createdAt": zod.string(),
   "lastUploadAt": zod.string().nullish(),
-  "lastUploadStatus": zod.string().nullish()
+  "lastUploadStatus": zod.string().nullish(),
+  "latestUploadDate": zod.string().nullish().describe('ISO date of the most recent committed upload; used as the isCurrent anchor.')
 })
 
 
@@ -232,7 +234,8 @@ export const UpdateDistributorResponse = zod.object({
   "stalenessThresholdDays": zod.number(),
   "createdAt": zod.string(),
   "lastUploadAt": zod.string().nullish(),
-  "lastUploadStatus": zod.string().nullish()
+  "lastUploadStatus": zod.string().nullish(),
+  "latestUploadDate": zod.string().nullish().describe('ISO date of the most recent committed upload; used as the isCurrent anchor.')
 })
 
 
@@ -505,6 +508,8 @@ export const GetComparisonResponse = zod.object({
   "sellPrice": zod.number().nullish(),
   "soh": zod.number().nullish(),
   "soo": zod.number().nullish(),
+  "snapshotDate": zod.string().nullish().describe('ISO date of the snapshot this entry is drawn from; null when the distributor has no data for this product.'),
+  "isCurrent": zod.boolean().optional().describe('True when snapshotDate equals or exceeds the distributor\'s most recent committed upload date.'),
   "movement": zod.number().nullish(),
   "movementSinceDate": zod.string().nullish(),
   "isNew": zod.boolean().optional(),
@@ -521,7 +526,8 @@ export const GetComparisonResponse = zod.object({
   "stalenessThresholdDays": zod.number(),
   "createdAt": zod.string(),
   "lastUploadAt": zod.string().nullish(),
-  "lastUploadStatus": zod.string().nullish()
+  "lastUploadStatus": zod.string().nullish(),
+  "latestUploadDate": zod.string().nullish().describe('ISO date of the most recent committed upload; used as the isCurrent anchor.')
 })),
   "total": zod.number(),
   "page": zod.number().nullish(),

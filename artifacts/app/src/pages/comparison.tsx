@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { AgGridReact } from "ag-grid-react";
 import { ModuleRegistry, AllCommunityModule, themeQuartz } from "ag-grid-community";
-import type { ColDef, ColGroupDef, RowClassParams, ValueFormatterParams, CellClassParams, CellStyle } from "ag-grid-community";
+import type { ColDef, ColGroupDef, RowClassParams, ValueFormatterParams, CellClassParams, CellStyle, ITooltipParams } from "ag-grid-community";
 import {
   useGetComparison,
   useListBrands,
@@ -63,6 +63,14 @@ function fmtDeltaPct(v: number | null | undefined): string {
   return `${v >= 0 ? "+" : ""}${Math.round(v)}%`;
 }
 
+/** Format an ISO date string (YYYY-MM-DD) as DD.MM.YYYY */
+function fmtDateDDMMYYYY(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-");
+  if (parts.length !== 3) return dateStr;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+}
+
 // ---------------------------------------------------------------------------
 // Row flattening
 // ---------------------------------------------------------------------------
@@ -74,6 +82,8 @@ type FlatRow = {
   description: string;
   dickerIsMostExpensive: boolean;
   cheapestCompetitorId: number | null;
+  /** True when every distributor's snapshot is stale (none are current). */
+  allStale: boolean;
   [key: string]: unknown;
 };
 
@@ -86,16 +96,37 @@ function flattenRows(rows: ComparisonRow[]): FlatRow[] {
       description: row.description,
       dickerIsMostExpensive: row.dickerIsMostExpensive,
       cheapestCompetitorId: row.cheapestCompetitorId ?? null,
+      allStale: row.distributors.every((d) => !d.isCurrent),
     };
     for (const d of row.distributors) {
-      flat[`d${d.distributorId}_price`]    = d.sellPrice ?? null;
-      flat[`d${d.distributorId}_soh`]      = d.soh ?? null;
-      flat[`d${d.distributorId}_delta`]    = d.priceDelta ?? null;
-      flat[`d${d.distributorId}_deltaPct`] = d.priceDeltaPct ?? null;
-      flat[`d${d.distributorId}_cheapest`] = row.cheapestCompetitorId === d.distributorId;
+      flat[`d${d.distributorId}_price`]        = d.sellPrice ?? null;
+      flat[`d${d.distributorId}_soh`]          = d.soh ?? null;
+      flat[`d${d.distributorId}_delta`]        = d.priceDelta ?? null;
+      flat[`d${d.distributorId}_deltaPct`]     = d.priceDeltaPct ?? null;
+      flat[`d${d.distributorId}_cheapest`]     = row.cheapestCompetitorId === d.distributorId;
+      flat[`d${d.distributorId}_isCurrent`]    = d.isCurrent ?? false;
+      flat[`d${d.distributorId}_snapshotDate`] = d.snapshotDate ?? null;
     }
     return flat;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Staleness helpers (used inside column definitions)
+// ---------------------------------------------------------------------------
+
+function getIsCurrent(data: FlatRow | undefined, distId: number): boolean {
+  return !!(data?.[`d${distId}_isCurrent`] as boolean | undefined);
+}
+
+function getSnapshotDate(data: FlatRow | undefined, distId: number): string | null {
+  return (data?.[`d${distId}_snapshotDate`] as string | null | undefined) ?? null;
+}
+
+function staleTooltip(data: FlatRow | undefined, distId: number): string | null {
+  if (getIsCurrent(data, distId)) return null;
+  const d = getSnapshotDate(data, distId);
+  return d ? `Last seen ${fmtDateDDMMYYYY(d)}` : "No data";
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +134,7 @@ function flattenRows(rows: ComparisonRow[]): FlatRow[] {
 // ---------------------------------------------------------------------------
 
 const MONO: CellStyle = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11 };
+const STALE_MONO: CellStyle = { ...MONO, color: "#9ca3af" };
 
 function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
   const leftPinned: ColDef[] = [
@@ -139,8 +171,16 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       type: "rightAligned",
       cellClass: "dist-group-start",
       headerClass: "dist-group-start",
-      cellStyle: MONO,
-      valueFormatter: (p: ValueFormatterParams) => fmtPrice(p.value as number | null),
+      cellStyle: (p: CellClassParams): CellStyle => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return STALE_MONO;
+        return MONO;
+      },
+      valueFormatter: (p: ValueFormatterParams) => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return "—";
+        return fmtPrice(p.value as number | null);
+      },
+      tooltipValueGetter: (p: ITooltipParams) =>
+        staleTooltip(p.data as FlatRow, d.id),
       comparator: (a: number | null, b: number | null) => (a ?? -Infinity) - (b ?? -Infinity),
     };
 
@@ -150,8 +190,16 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       field: `d${d.id}_soh`,
       width: 68,
       type: "rightAligned",
-      cellStyle: MONO,
-      valueFormatter: (p: ValueFormatterParams) => fmtSoh(p.value as number | null),
+      cellStyle: (p: CellClassParams): CellStyle => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return STALE_MONO;
+        return MONO;
+      },
+      valueFormatter: (p: ValueFormatterParams) => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return "—";
+        return fmtSoh(p.value as number | null);
+      },
+      tooltipValueGetter: (p: ITooltipParams) =>
+        staleTooltip(p.data as FlatRow, d.id),
       comparator: (a: number | null, b: number | null) => (a ?? -1) - (b ?? -1),
     };
 
@@ -171,11 +219,17 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       width: 88,
       type: "rightAligned",
       cellStyle: (p: CellClassParams): CellStyle => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return STALE_MONO;
         const v = p.value as number | null;
         if (v == null) return MONO;
         return { ...MONO, color: v < 0 ? "#dc2626" : "#16a34a", fontWeight: "600" } as CellStyle;
       },
-      valueFormatter: (p: ValueFormatterParams) => fmtDelta(p.value as number | null),
+      valueFormatter: (p: ValueFormatterParams) => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return "—";
+        return fmtDelta(p.value as number | null);
+      },
+      tooltipValueGetter: (p: ITooltipParams) =>
+        staleTooltip(p.data as FlatRow, d.id),
       comparator: (a: number | null, b: number | null) => (a ?? 0) - (b ?? 0),
     };
 
@@ -186,11 +240,17 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       width: 66,
       type: "rightAligned",
       cellStyle: (p: CellClassParams): CellStyle => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return STALE_MONO;
         const v = p.value as number | null;
         if (v == null) return MONO;
         return { ...MONO, color: v < 0 ? "#dc2626" : "#16a34a" } as CellStyle;
       },
-      valueFormatter: (p: ValueFormatterParams) => fmtDeltaPct(p.value as number | null),
+      valueFormatter: (p: ValueFormatterParams) => {
+        if (!getIsCurrent(p.data as FlatRow, d.id)) return "—";
+        return fmtDeltaPct(p.value as number | null);
+      },
+      tooltipValueGetter: (p: ITooltipParams) =>
+        staleTooltip(p.data as FlatRow, d.id),
       comparator: (a: number | null, b: number | null) => (a ?? 0) - (b ?? 0),
     };
 
@@ -208,11 +268,12 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
 // ---------------------------------------------------------------------------
 
 export default function Comparison() {
-  const [brandFilter, setBrandFilter] = useState<string>("all");
+  const [brandFilter, setBrandFilter]       = useState<string>("all");
   const [onlyMostExpensive, setOnlyMostExpensive] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
-  const [searchParam, setSearchParam] = useState("");
-  const [exporting, setExporting] = useState(false);
+  const [showStaleRows, setShowStaleRows]   = useState(false);
+  const [searchInput, setSearchInput]       = useState("");
+  const [searchParam, setSearchParam]       = useState("");
+  const [exporting, setExporting]           = useState(false);
   const [selectedDistIds, setSelectedDistIds] = useState<Set<number>>(new Set());
 
   const { data: brandsData } = useListBrands();
@@ -228,8 +289,9 @@ export default function Comparison() {
     const p: Record<string, string> = {};
     if (brandFilter && brandFilter !== "all") p.brand = brandFilter;
     if (searchParam) p.search = searchParam;
+    if (showStaleRows) p.showStale = "true";
     return Object.keys(p).length ? p : undefined;
-  }, [brandFilter, searchParam]);
+  }, [brandFilter, searchParam, showStaleRows]);
 
   const { data, isLoading, isError } = useGetComparison(queryParams, {
     query: { staleTime: 60_000, queryKey: ["comparison", queryParams] },
@@ -274,6 +336,7 @@ export default function Comparison() {
   const rowClassRules = useMemo(
     () => ({
       "row-dicker-expensive": (p: RowClassParams<FlatRow>) => !!(p.data?.dickerIsMostExpensive),
+      "row-all-stale": (p: RowClassParams<FlatRow>) => !!(p.data?.allStale),
     }),
     [],
   );
@@ -417,6 +480,16 @@ export default function Comparison() {
           Only where Dicker is most expensive
         </label>
 
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showStaleRows}
+            onChange={(e) => setShowStaleRows(e.target.checked)}
+            className="rounded-sm"
+          />
+          Show last-known prices for delisted SKUs
+        </label>
+
         {isLoading && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -461,6 +534,9 @@ export default function Comparison() {
       <style>{`
         .row-dicker-expensive {
           background-color: #fff1f2 !important;
+        }
+        .row-all-stale {
+          opacity: 0.45;
         }
         .ag-cell.dist-group-start {
           border-left: 2px solid #94a3b8 !important;

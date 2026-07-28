@@ -101,16 +101,27 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   type SnapRow = {
     product_id: number; distributor_id: number;
     sell_price: string | null; soh: number | null; soo: number | null;
+    snapshot_date: string | null;
   };
   const snapResult = await db.execute(sql`
     SELECT DISTINCT ON (product_id, distributor_id)
-      product_id, distributor_id, sell_price, soh, soo
+      product_id, distributor_id, sell_price, soh, soo, snapshot_date
     FROM stock_snapshots
     ORDER BY product_id, distributor_id, snapshot_date DESC, id DESC
   `);
   const snapMap = new Map<string, SnapRow>();
   for (const r of snapResult.rows as SnapRow[]) {
     snapMap.set(`${r.product_id}:${r.distributor_id}`, r);
+  }
+
+  // Helper: is this snapshot from the distributor's latest committed upload?
+  // Stale snapshots (from older uploads) are blanked out in DATA sheets so
+  // formulas don't silently use outdated prices.
+  function isSnapCurrent(snap: SnapRow | undefined, distId: number): boolean {
+    if (!snap?.snapshot_date) return false;
+    const currentDate = freshnessMap.get(distId);
+    if (!currentDate) return false;
+    return String(snap.snapshot_date) >= String(currentDate);
   }
 
   // ── 5a. Horizontal format (formula-driven, two-tab: paste + compare) ──
@@ -161,14 +172,16 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
       return bSOH - aSOH;
     });
     for (const p of sortedH) {
-      const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
-      const dkSOH   = dkSnap?.soh ?? null;
-      const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+      const dkSnap   = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
+      const dkCurrent = dickerDist ? isSnapCurrent(dkSnap, dickerDist.id) : false;
+      const dkSOH   = dkCurrent ? (dkSnap?.soh ?? null) : null;
+      const dkPrice = dkCurrent && dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
       const compCols = competitors.flatMap((c) => {
-        const snap = snapMap.get(`${p.id}:${c.id}`);
+        const snap    = snapMap.get(`${p.id}:${c.id}`);
+        const current = isSnapCurrent(snap, c.id);
         return [
-          snap?.soh ?? null,
-          snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
+          current ? (snap?.soh ?? null) : null,
+          current && snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
         ];
       });
       hDataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
@@ -586,15 +599,17 @@ router.get("/compare-file", requireAuth, async (req, res): Promise<void> => {
   });
 
   for (const p of sortedProducts) {
-    const dkSnap  = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
-    const dkSOH   = dkSnap?.soh ?? null;
-    const dkPrice = dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
+    const dkSnap   = dickerDist ? snapMap.get(`${p.id}:${dickerDist.id}`) : undefined;
+    const dkCurrent = dickerDist ? isSnapCurrent(dkSnap, dickerDist.id) : false;
+    const dkSOH   = dkCurrent ? (dkSnap?.soh ?? null) : null;
+    const dkPrice = dkCurrent && dkSnap?.sell_price != null ? parseFloat(dkSnap.sell_price) : null;
     const compCols = competitorMeta.flatMap((c) => {
-      const snap = snapMap.get(`${p.id}:${c.id}`);
+      const snap    = snapMap.get(`${p.id}:${c.id}`);
+      const current = isSnapCurrent(snap, c.id);
       return [
-        snap?.soh ?? null,
-        snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
-        snap?.soo ?? null,
+        current ? (snap?.soh ?? null) : null,
+        current && snap?.sell_price != null ? parseFloat(snap.sell_price) : null,
+        current ? (snap?.soo ?? null) : null,
       ];
     });
     dataWs.addRow([p.vpnNormalized, p.brand, p.description, dkSOH, dkPrice, ...compCols]);
