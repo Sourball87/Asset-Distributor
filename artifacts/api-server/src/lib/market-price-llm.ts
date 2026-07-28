@@ -22,7 +22,7 @@ import { eq, sql } from "drizzle-orm";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const LLM_MODEL = "claude-haiku-4-5";
+export const LLM_MODEL = "claude-sonnet-4-6";
 export const DAILY_LLM_CAP = 100;
 const LLM_TIMEOUT_MS = 60_000;
 
@@ -394,7 +394,13 @@ Omit candidates that are not comparable. Similarity values: \
 "related" = same category but meaningfully different use case or form factor. \
 CPU tier rule: a different CPU tier (i5 vs i7, U5 vs U7) or a generation gap of 2 or more makes a candidate at most "partial", never "close". \
 Condition rule: if a candidate description indicates a non-new condition (OPEN BOX, EX-DEMO, REFURB, REFURBISHED, CARTON DAMAGE, DEMO, USED, etc.) \
-assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.`;
+assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.
+Product-line tier rule: Consider product-line positioning, not just specs. Vendor commercial tiers roughly align as:
+ PREMIUM/FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/Dragonfly, ASUS ExpertBook B9
+ MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 8xx, ASUS ExpertBook B5
+ VALUE COMMERCIAL/SMB: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L and ThinkBook, HP ProBook, ASUS ExpertBook B1
+ CONSUMER: Dell Inspiron/XPS consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook
+A candidate from a DIFFERENT tier than the source is at most "partial", even if specs match exactly. A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.`;
 
 // ── Main judge call ───────────────────────────────────────────────────────
 
