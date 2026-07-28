@@ -258,7 +258,19 @@ interface ParsedSnapshotRow {
 
 const DB_CHUNK = 500;
 
-async function commitRowsBatched(
+/**
+ * Thrown inside the commit transaction when zero snapshots survive brand/product
+ * resolution. The throw rolls back the transaction atomically so the superseded-UPDATE
+ * and DELETE never commit without a matching INSERT.
+ */
+export class EmptyCommitError extends Error {
+  constructor() {
+    super("EMPTY_COMMIT");
+    this.name = "EmptyCommitError";
+  }
+}
+
+export async function commitRowsBatched(
   rows: Record<string, string>[],
   mapping: Record<string, string | null>,
   uploadId: number,
@@ -439,30 +451,42 @@ async function commitRowsBatched(
     .filter((v): v is NonNullable<typeof v> => v !== null);
 
   // Replace semantics wrapped in a single transaction:
-  // 1. Mark any prior committed uploads for this distributor+date as superseded.
-  // 2. Delete existing snapshots for this distributor + date.
-  // 3. Insert the new batch.
+  // 1. Guard: if nothing survived brand/product resolution throw EmptyCommitError so
+  //    the superseded-UPDATE and DELETE never commit without a matching INSERT.
+  // 2. Mark any prior committed uploads for this distributor+date as superseded.
+  // 3. Delete existing snapshots for this distributor + date.
+  // 4. Insert the new batch.
   // Product upserts above intentionally remain outside — they are idempotent and
   // safe to run before the transaction opens.
-  await db.transaction(async (tx) => {
-    // Flip prior committed uploads for this slot to superseded before deleting their rows.
-    // The current upload still has status='parsing' at this point, so this UPDATE
-    // only touches uploads that were previously committed for this distributor+date.
-    await tx.update(uploadsTable)
-      .set({ status: "superseded" })
-      .where(and(
-        eq(uploadsTable.distributorId, distId),
-        eq(uploadsTable.snapshotDate, snapshotDate),
-        eq(uploadsTable.status, "committed"),
-      ));
+  try {
+    await db.transaction(async (tx) => {
+      // Guard inside transaction: zero snapshots → throw so the entire tx rolls back.
+      // This is defence-in-depth; the parsed.length === 0 early-return above already
+      // handles the common "no brand matches" case before the transaction opens.
+      if (snapshots.length === 0) throw new EmptyCommitError();
 
-    await tx.delete(stockSnapshotsTable)
-      .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
+      // Flip prior committed uploads for this slot to superseded before deleting their rows.
+      // The current upload still has status='parsing' at this point, so this UPDATE
+      // only touches uploads that were previously committed for this distributor+date.
+      await tx.update(uploadsTable)
+        .set({ status: "superseded" })
+        .where(and(
+          eq(uploadsTable.distributorId, distId),
+          eq(uploadsTable.snapshotDate, snapshotDate),
+          eq(uploadsTable.status, "committed"),
+        ));
 
-    for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
-      await tx.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
-    }
-  });
+      await tx.delete(stockSnapshotsTable)
+        .where(and(eq(stockSnapshotsTable.distributorId, distId), eq(stockSnapshotsTable.snapshotDate, snapshotDate)));
+
+      for (let i = 0; i < snapshots.length; i += DB_CHUNK) {
+        await tx.insert(stockSnapshotsTable).values(snapshots.slice(i, i + DB_CHUNK));
+      }
+    });
+  } catch (err) {
+    if (err instanceof EmptyCommitError) return 0;
+    throw err;
+  }
 
   return snapshots.length;
 }
