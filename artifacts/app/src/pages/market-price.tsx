@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertCircle, Loader2, Search, Zap } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertCircle, Loader2, RefreshCw, Search, Zap } from "lucide-react";
 
 // ── Types (mirroring OpenAPI schemas) ────────────────────────────────────
 
@@ -230,9 +231,11 @@ function SourceCard({ source }: { source: MarketPriceSource }) {
 function SkuTab({
   onResult,
   onLoading,
+  onError,
 }: {
   onResult: (r: MarketPriceResult | null) => void;
   onLoading: (v: boolean) => void;
+  onError: (msg: string, retry: () => void) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<ProductSuggestion | null>(null);
@@ -250,7 +253,7 @@ function SkuTab({
     onSuccess: (data) => onResult(data),
     onError: (err: Error) => {
       onResult(null);
-      alert(err.message);
+      onError(err.message, () => { if (selectedProduct) search.mutate(selectedProduct.id); });
     },
   });
 
@@ -326,9 +329,11 @@ function SkuTab({
 function SpecTab({
   onResult,
   onLoading,
+  onError,
 }: {
   onResult: (r: MarketPriceResult | null) => void;
   onLoading: (v: boolean) => void;
+  onError: (msg: string, retry: () => void) => void;
 }) {
   const [specText, setSpecText] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
@@ -345,7 +350,10 @@ function SpecTab({
     onSuccess: (data) => onResult(data),
     onError: (err: Error) => {
       onResult(null);
-      alert(err.message);
+      const retryBody: { specText: string; maxPrice?: number } = { specText };
+      const p = parseFloat(maxPrice);
+      if (!isNaN(p) && p > 0) retryBody.maxPrice = p;
+      onError(err.message, () => search.mutate(retryBody));
     },
   });
 
@@ -401,9 +409,14 @@ function SpecTab({
 export default function MarketPrice() {
   const [result, setResult] = useState<MarketPriceResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchError, setSearchError] = useState<{ message: string; retry: () => void } | null>(null);
 
   const handleResult = useCallback((r: MarketPriceResult | null) => setResult(r), []);
-  const handleLoading = useCallback((v: boolean) => setIsLoading(v), []);
+  const handleLoading = useCallback((v: boolean) => {
+    setIsLoading(v);
+    if (v) setSearchError(null); // clear error when a new search starts
+  }, []);
+  const handleError = useCallback((msg: string, retry: () => void) => setSearchError({ message: msg, retry }), []);
 
   return (
     <div className="space-y-4">
@@ -436,10 +449,10 @@ export default function MarketPrice() {
             <TabsTrigger value="spec" className="text-xs h-7">By specs</TabsTrigger>
           </TabsList>
           <TabsContent value="sku">
-            <SkuTab onResult={handleResult} onLoading={handleLoading} />
+            <SkuTab onResult={handleResult} onLoading={handleLoading} onError={handleError} />
           </TabsContent>
           <TabsContent value="spec">
-            <SpecTab onResult={handleResult} onLoading={handleLoading} />
+            <SpecTab onResult={handleResult} onLoading={handleLoading} onError={handleError} />
           </TabsContent>
         </Tabs>
       </div>
@@ -452,8 +465,27 @@ export default function MarketPrice() {
         </div>
       )}
 
+      {/* Inline error with retry */}
+      {!isLoading && searchError && (
+        <div className="space-y-2">
+          <Alert variant="destructive" className="rounded-sm">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle className="text-sm font-medium">Search failed</AlertTitle>
+            <AlertDescription className="text-xs mt-0.5">{searchError.message}</AlertDescription>
+          </Alert>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+            onClick={() => { setSearchError(null); searchError.retry(); }}
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Try again
+          </Button>
+        </div>
+      )}
+
       {/* Results */}
-      {!isLoading && result && (
+      {!isLoading && !searchError && result && (
         <div className="space-y-3">
           {/* Meta strip */}
           <div className="flex items-center gap-3 text-xs text-muted-foreground">

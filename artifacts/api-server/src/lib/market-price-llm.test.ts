@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   stripFences,
+  extractJsonFromLlmText,
   makeQueryHash,
   callLlmJudge,
   LlmCapExceededError,
@@ -34,6 +35,37 @@ describe("stripFences", () => {
   it("handles leading/trailing whitespace inside fences", () => {
     const input = '```json\n  {"matches":[]}\n  \n```';
     expect(JSON.parse(stripFences(input))).toEqual({ matches: [] });
+  });
+});
+
+// ── extractJsonFromLlmText ────────────────────────────────────────────────
+
+describe("extractJsonFromLlmText", () => {
+  it("parses clean JSON directly", () => {
+    const result = extractJsonFromLlmText('{"matches":[]}');
+    expect(result).toEqual({ matches: [] });
+  });
+
+  it("parses fenced JSON after stripping fences", () => {
+    const result = extractJsonFromLlmText('```json\n{"matches":[]}\n```');
+    expect(result).toEqual({ matches: [] });
+  });
+
+  it("extracts JSON when there is a preamble sentence before the object", () => {
+    const input = 'Here are the matching candidates:\n{"matches":[{"index":0,"similarity":"close","reason":"identical specs"}]}';
+    const result = extractJsonFromLlmText(input) as { matches: unknown[] };
+    expect(result.matches).toHaveLength(1);
+  });
+
+  it("extracts JSON when there is trailing commentary after the object", () => {
+    const input = '{"matches":[]}\nNote: no comparable products were found.';
+    const result = extractJsonFromLlmText(input);
+    expect(result).toEqual({ matches: [] });
+  });
+
+  it("throws on genuinely truncated JSON (no closing brace)", () => {
+    const truncated = '{"matches":[{"index":0,"similarity":"close","r';
+    expect(() => extractJsonFromLlmText(truncated)).toThrow();
   });
 });
 

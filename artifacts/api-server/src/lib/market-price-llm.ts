@@ -16,6 +16,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
+import { logger } from "./logger";
 import { db } from "@workspace/db";
 import { marketPriceLlmCallsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
@@ -120,6 +121,38 @@ export function stripFences(text: string): string {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
+}
+
+/**
+ * Robustly extract and parse a JSON object from LLM output.
+ *
+ * Steps:
+ *   1. Strip markdown fences.
+ *   2. Attempt JSON.parse directly (handles clean or fence-only wrapped output).
+ *   3. If that fails, find the first '{' and last '}' in the text and retry —
+ *      this handles a preamble sentence before the JSON or trailing commentary.
+ *   4. If that also fails, let the SyntaxError propagate (caller wraps in
+ *      LlmUnavailableError).
+ */
+export function extractJsonFromLlmText(text: string): unknown {
+  const stripped = stripFences(text);
+
+  // Step 2: direct parse — the common case after fence stripping
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    // fall through to bracket extraction
+  }
+
+  // Step 3: bracket extraction — handles preamble / trailing commentary
+  const first = stripped.indexOf("{");
+  const last = stripped.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    return JSON.parse(stripped.slice(first, last + 1));
+    // Let this throw naturally if the extracted substring is also invalid JSON
+  }
+
+  throw new SyntaxError("no JSON object found in LLM text");
 }
 
 // ── Query hash ────────────────────────────────────────────────────────────
@@ -400,7 +433,8 @@ Product-line tier rule: Consider product-line positioning, not just specs. Vendo
  MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 8xx, ASUS ExpertBook B5
  VALUE COMMERCIAL/SMB: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L and ThinkBook, HP ProBook, ASUS ExpertBook B1
  CONSUMER: Dell Inspiron/XPS consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook
-A candidate from a DIFFERENT tier than the source is at most "partial", even if specs match exactly. A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.`;
+A candidate from a DIFFERENT tier than the source is at most "partial", even if specs match exactly. A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.
+Return at most 12 matches. Each reason must be 15 words or fewer. Respond with raw JSON only — no preamble, no commentary, no markdown fences.`;
 
 // ── Main judge call ───────────────────────────────────────────────────────
 
@@ -440,11 +474,12 @@ export async function callLlmJudge(
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
 
   let rawText: string;
+  let stopReason: string | null = null;
   try {
     const response = await client.messages.create(
       {
         model: LLM_MODEL,
-        max_tokens: 2000,
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userMessage }],
       },
@@ -452,6 +487,7 @@ export async function callLlmJudge(
     );
     const block = response.content[0];
     rawText = block.type === "text" ? block.text : "";
+    stopReason = response.stop_reason;
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new LlmUnavailableError("Matching service timed out after 60s");
@@ -463,12 +499,25 @@ export async function callLlmJudge(
     clearTimeout(timer);
   }
 
-  // Parse — strip fences defensively
+  // Detect hard truncation before attempting parse — response was cut mid-JSON
+  if (stopReason === "max_tokens") {
+    logger.error(
+      { rawTextLength: rawText.length, stopReason, model: LLM_MODEL },
+      "LLM response truncated (max_tokens hit)",
+    );
+    throw new LlmUnavailableError("LLM response truncated — too many matches");
+  }
+
+  // Parse — strip fences with bracket-extraction fallback
   const validIndices = new Set(cands.map((c) => c.index));
   let parsed: LlmJudgeResult;
   try {
-    parsed = JSON.parse(stripFences(rawText)) as LlmJudgeResult;
+    parsed = extractJsonFromLlmText(rawText) as LlmJudgeResult;
   } catch {
+    logger.error(
+      { rawText, rawTextLength: rawText.length, stopReason, model: LLM_MODEL },
+      "LLM returned unparseable JSON",
+    );
     throw new LlmUnavailableError("LLM returned unparseable JSON");
   }
 
