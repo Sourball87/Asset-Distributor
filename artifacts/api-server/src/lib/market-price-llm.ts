@@ -245,6 +245,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /thinkpad\s+x1\b/i,       // X1 Carbon, X1 Yoga, X1 Extreme, X1 Nano
       /thinkpad\s+x9\b/i,       // X9 series
       /elitebook\s+ultra/i,     // HP EliteBook Ultra
+      /elitebook\s+x\b/i,       // HP EliteBook X (flagship tier)
       /dragonfly/i,             // HP EliteBook Dragonfly
       /pro\w*\s+premium/i,      // Dell Pro Premium / Pro14 Premium (new naming)
       /latitude\s+9\d{3}/i,     // Dell Latitude 9xxx (legacy naming)
@@ -258,7 +259,6 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /thinkpad\s+x13\b/i,      // X13 (not X1, not X9)
       /elitebook\s+6\b/i,       // HP EliteBook 6 series
       /elitebook\s+8\b/i,       // HP EliteBook 8 series
-      /elitebook\s+x\b/i,       // HP EliteBook X (non-Ultra)
       /\bpro\s*(?:plus|1[46]\s*plus|16\s*plus)\b/i, // Dell Pro Plus / Pro14 Plus / Pro16 Plus
       /latitude\s+[57]\d{3}/i,  // Dell Latitude 5xxx / 7xxx (legacy)
       /expertbook\s+b5/i,
@@ -542,12 +542,12 @@ CPU tier rule: a different CPU tier (i5 vs i7, U5 vs U7) or a generation gap of 
 Condition rule: if a candidate description indicates a non-new condition (OPEN BOX, EX-DEMO, REFURB, REFURBISHED, CARTON DAMAGE, DEMO, USED, etc.) \
 assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.
 Product-line tier rule: Consider product-line positioning, not just specs. Vendor commercial tiers roughly align as:
- FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/Dragonfly, ASUS ExpertBook B9
- MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 6-series/8-series/EliteBook X, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
+ FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/EliteBook X/Dragonfly, ASUS ExpertBook B9
+ MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 6-series/8-series, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
  VALUE COMMERCIAL: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L, Lenovo ThinkBook, HP ProBook, ASUS ExpertBook B1, Acer TravelMate P2/B series
  CONSUMER: Dell Inspiron/XPS-consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook, Acer Aspire/Swift/Nitro, MSI consumer lines
 Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related. Dell naming: Pro Base = value, Pro Plus = mainstream, Pro Premium = flagship.
-Lenovo ThinkPad T-series/X13, HP EliteBook 6/8/X, and Dell Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
+Lenovo ThinkPad T-series/X13, HP EliteBook 6/8, and Dell Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
 ThinkPad T14 and T14S are the same product family at the same mainstream tier — never rate T14S lower than T14 or below mainstream commercial.
 FLAGSHIP products (X1 Carbon, X9, EliteBook Ultra, Dragonfly, Dell Pro Premium) against a MAINSTREAM source must be rated "partial" as a premium alternative — never "close", regardless of how well the specs align.
 A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.

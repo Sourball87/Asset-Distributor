@@ -549,8 +549,8 @@ describe("detectProductTier", () => {
   it("detects HP EliteBook 8 as mainstream", () => {
     expect(detectProductTier("HP ELITEBOOK 8 G1I 16 U7-256V 32GB 1TB W11P")).toBe("mainstream");
   });
-  it("detects HP EliteBook X as mainstream", () => {
-    expect(detectProductTier("HP ELITEBOOK X G11 14 U5-226V 16GB 512GB W11P")).toBe("mainstream");
+  it("detects HP EliteBook X as flagship", () => {
+    expect(detectProductTier("HP ELITEBOOK X G11 14 U5-226V 16GB 512GB W11P")).toBe("flagship");
   });
   it("detects Dell Pro Plus as mainstream", () => {
     expect(detectProductTier("DELL PRO14 PLUS NOTEBOOK 14 FHD U7-268V 32GB W11P 3Y PRO")).toBe("mainstream");
@@ -642,6 +642,15 @@ describe("applyDeterministicGuard — product-tier enforcement", () => {
     ]);
     expect(result[0]!.similarity).toBe("partial");
     expect(result[0]!.reason).toContain("flagship");
+  });
+
+  it("demotes EliteBook X from close → partial (flagship vs mainstream)", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("HP ELITEBOOK X G1I 14 AI U7-258V 32GB 512GB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toContain("flagship");
+    expect(result[0]!.reason).toContain("premium alternative");
   });
 
   it("demotes ThinkBook from close → partial (value vs mainstream source)", () => {

@@ -2,3 +2,4 @@
 - [DistiBench post-merge DB tables](distibench-post-merge-db.md) — Tables not managed by Drizzle push (user_sessions, password_reset_tokens) must be created manually after merges.
 - [DistiBench SMTP setup](distibench-smtp.md) — Gmail SMTP configured via env vars; distibench.notifications@gmail.com with App Password in SMTP_PASS secret.
 - [DistiBench upload hardening](distibench-upload-hardening.md) — Upload status values, superseded tracking, empty-commit rejection, freshness anchor EXISTS pattern, purge endpoint gating, backup tables.
+- [Market Price tier decisions](market-price-tier-decisions.md) — EliteBook X = flagship (Jay confirmed); SYSTEM_PROMPT+FAMILY_TIER_MAP must stay in sync; brand-tiers test needs partialMatch=true.

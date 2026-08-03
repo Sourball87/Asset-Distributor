@@ -142,7 +142,7 @@ afterAll(async () => {
 describe("Comparison endpoint — reference brand filtering", () => {
   it("excludes reference-brand products from comparison grid by default", async () => {
     const res = await request(comparisonApp)
-      .get(`/comparison?search=${encodeURIComponent(UNIQUE)}`)
+      .get(`/comparison?search=${encodeURIComponent(UNIQUE)}&partialMatch=true`)
       .expect(200);
 
     const vpns: string[] = (res.body.rows ?? []).map((r: { vpnNormalized: string }) => r.vpnNormalized);
@@ -151,7 +151,7 @@ describe("Comparison endpoint — reference brand filtering", () => {
 
   it("includes core-brand products in comparison grid", async () => {
     const res = await request(comparisonApp)
-      .get(`/comparison?search=${encodeURIComponent(UNIQUE)}`)
+      .get(`/comparison?search=${encodeURIComponent(UNIQUE)}&partialMatch=true`)
       .expect(200);
 
     const vpns: string[] = (res.body.rows ?? []).map((r: { vpnNormalized: string }) => r.vpnNormalized);
