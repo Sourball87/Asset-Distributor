@@ -24,10 +24,11 @@ function mono(opts: Partial<ExcelJS.Font> = {}): Partial<ExcelJS.Font> {
 }
 
 router.get("/comparison-export", requireAuth, async (req, res): Promise<void> => {
-  const brand            = (req.query.brand  as string | undefined)?.trim().toUpperCase() || null;
-  const search           = (req.query.search as string | undefined)?.trim() || null;
+  const brand             = (req.query.brand        as string | undefined)?.trim().toUpperCase() || null;
+  const search            = (req.query.search       as string | undefined)?.trim() || null;
   const onlyMostExpensive = req.query.onlyMostExpensive === "true";
-  const searchPattern    = search ? `%${search}%` : null;
+  const partialMatch      = (req.query.partialMatch as string | undefined) === "true";
+  const searchPattern     = search ? (partialMatch ? `%${search}%` : search) : null;
 
   // ── 1. Query all matching rows (no pagination) ─────────────────────────────
   type QueryRow = {
@@ -54,7 +55,7 @@ router.get("/comparison-export", requireAuth, async (req, res): Promise<void> =>
           AND ($2::text IS NULL OR (
                p.vpn_normalized ILIKE $2
             OR p.vpn_display    ILIKE $2
-            OR p.description    ILIKE $2
+            OR ($3::boolean = true AND p.description ILIKE $2)
           ))
       ),
       latest_ss AS (
@@ -86,7 +87,7 @@ router.get("/comparison-export", requireAuth, async (req, res): Promise<void> =>
     LEFT JOIN latest_ss l ON l.product_id = fp.id AND l.distributor_id = d.id
     GROUP BY fp.id, fp.vpn_normalized, fp.vpn_display, fp.brand, fp.description
     ORDER BY fp.brand, fp.vpn_normalized
-  `, [brand, searchPattern]);
+  `, [brand, searchPattern, partialMatch]);
 
   // ── 2. Compute deltas, flags ───────────────────────────────────────────────
   type CompRow = {

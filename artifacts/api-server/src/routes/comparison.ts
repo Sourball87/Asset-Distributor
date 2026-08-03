@@ -6,14 +6,16 @@ const router = Router();
 
 router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
   const brand     = (req.query.brand    as string | undefined)?.trim().toUpperCase() || null;
-  const search    = (req.query.search   as string | undefined)?.trim() || null;
-  const page      = Math.max(1, parseInt((req.query.page     as string) ?? "1") || 1);
-  const pageSize  = Math.max(0, parseInt((req.query.pageSize as string) ?? "0") || 0);
+  const search       = (req.query.search       as string | undefined)?.trim() || null;
+  const page         = Math.max(1, parseInt((req.query.page     as string) ?? "1") || 1);
+  const pageSize     = Math.max(0, parseInt((req.query.pageSize as string) ?? "0") || 0);
   // showStale=true includes products where no distributor has a current snapshot.
   // Default false: only products with at least one current distributor snapshot are returned.
-  const showStale = (req.query.showStale as string | undefined) === "true";
+  const showStale    = (req.query.showStale    as string | undefined) === "true";
+  // partialMatch=true uses %search% across VPN + description; default is exact VPN-only match.
+  const partialMatch = (req.query.partialMatch as string | undefined) === "true";
 
-  const searchPattern = search ? `%${search}%` : null;
+  const searchPattern = search ? (partialMatch ? `%${search}%` : search) : null;
   const limitVal  = pageSize > 0 ? pageSize : null;   // null → LIMIT NULL → no cap
   const offsetVal = pageSize > 0 ? (page - 1) * pageSize : 0;
 
@@ -54,7 +56,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
           AND ($2::text IS NULL OR (
                p.vpn_normalized ILIKE $2
             OR p.vpn_display    ILIKE $2
-            OR p.description    ILIKE $2
+            OR ($6::boolean = true AND p.description ILIKE $2)
           ))
           AND ($5::boolean = true OR p.id IN (
             SELECT DISTINCT ss2.product_id
@@ -115,7 +117,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     CROSS JOIN total t
     GROUP BY pp.id, pp.vpn_normalized, pp.vpn_display, pp.brand, pp.description, t.cnt
     ORDER BY pp.brand, pp.vpn_normalized
-  `, [brand, searchPattern, limitVal, offsetVal, showStale]);
+  `, [brand, searchPattern, limitVal, offsetVal, showStale, partialMatch]);
 
   // ── Distributor metadata with latest committed upload date ──────────────────
   type DistRow = {

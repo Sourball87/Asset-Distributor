@@ -386,6 +386,7 @@ export default function Comparison() {
   const [brandFilter, setBrandFilter]       = useState<string>("all");
   const [onlyMostExpensive, setOnlyMostExpensive] = useState(false);
   const [showStaleRows, setShowStaleRows]   = useState(false);
+  const [partialMatch, setPartialMatch]     = useState(false);
   const [searchInput, setSearchInput]       = useState("");
   const [searchParam, setSearchParam]       = useState("");
   const [exporting, setExporting]           = useState(false);
@@ -405,8 +406,9 @@ export default function Comparison() {
     if (brandFilter && brandFilter !== "all") p.brand = brandFilter;
     if (searchParam) p.search = searchParam;
     if (showStaleRows) p.showStale = "true";
+    if (searchParam && partialMatch) p.partialMatch = "true";
     return Object.keys(p).length ? p : undefined;
-  }, [brandFilter, searchParam, showStaleRows]);
+  }, [brandFilter, searchParam, showStaleRows, partialMatch]);
 
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<number>>(new Set());
 
@@ -476,6 +478,7 @@ export default function Comparison() {
       const params = new URLSearchParams();
       if (brandFilter && brandFilter !== "all") params.set("brand", brandFilter);
       if (searchParam) params.set("search", searchParam);
+      if (searchParam && partialMatch) params.set("partialMatch", "true");
       if (onlyMostExpensive) params.set("onlyMostExpensive", "true");
 
       const response = await fetch(`/api/comparison-export?${params.toString()}`, { credentials: "include" });
@@ -595,9 +598,19 @@ export default function Comparison() {
         <Input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search VPN or description…"
-          className="h-8 w-60 text-xs rounded-sm font-mono"
+          placeholder="Search VPN…"
+          className="h-8 w-52 text-xs rounded-sm font-mono"
         />
+
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={partialMatch}
+            onChange={(e) => setPartialMatch(e.target.checked)}
+            className="rounded-sm"
+          />
+          Partial match
+        </label>
 
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
           <input
