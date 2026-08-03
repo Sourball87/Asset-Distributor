@@ -429,11 +429,13 @@ CPU tier rule: a different CPU tier (i5 vs i7, U5 vs U7) or a generation gap of 
 Condition rule: if a candidate description indicates a non-new condition (OPEN BOX, EX-DEMO, REFURB, REFURBISHED, CARTON DAMAGE, DEMO, USED, etc.) \
 assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.
 Product-line tier rule: Consider product-line positioning, not just specs. Vendor commercial tiers roughly align as:
- PREMIUM/FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/Dragonfly, ASUS ExpertBook B9
- MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 8xx, ASUS ExpertBook B5
- VALUE COMMERCIAL/SMB: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L and ThinkBook, HP ProBook, ASUS ExpertBook B1
- CONSUMER: Dell Inspiron/XPS consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook
-A candidate from a DIFFERENT tier than the source is at most "partial", even if specs match exactly. A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.
+ FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/Dragonfly, ASUS ExpertBook B9
+ MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 8-series and EliteBook X, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
+ VALUE COMMERCIAL: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L, Lenovo ThinkBook, HP ProBook, ASUS ExpertBook B1, Acer TravelMate P2/B series
+ CONSUMER: Dell Inspiron/XPS-consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook, Acer Aspire/Swift/Nitro, MSI consumer lines
+Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related. Dell naming: Pro Base = value, Pro Plus = mainstream, Pro Premium = flagship.
+A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.
+For brands or product lines not listed above, infer the tier from description and price positioning (vPro/3Y-onsite/TPM/"for Business" → commercial; consumer naming → consumer). If the tier cannot be determined, judge on specs alone, rate at most "partial", and state "tier unverified" in the reason.
 Return at most 12 matches. Each reason must be 15 words or fewer. Respond with raw JSON only — no preamble, no commentary, no markdown fences.`;
 
 // ── Main judge call ───────────────────────────────────────────────────────
@@ -480,6 +482,7 @@ export async function callLlmJudge(
       {
         model: LLM_MODEL,
         max_tokens: 8000,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user",   content: userMessage },
