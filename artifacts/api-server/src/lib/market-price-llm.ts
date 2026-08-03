@@ -430,12 +430,14 @@ Condition rule: if a candidate description indicates a non-new condition (OPEN B
 assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.
 Product-line tier rule: Consider product-line positioning, not just specs. Vendor commercial tiers roughly align as:
  FLAGSHIP: Dell Pro Premium (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/Dragonfly, ASUS ExpertBook B9
- MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 8-series and EliteBook X, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
+ MAINSTREAM COMMERCIAL: Dell Pro Plus (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 6-series/8-series/EliteBook X, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
  VALUE COMMERCIAL: Dell Pro Base (ex-Latitude 3000), Lenovo ThinkPad E/L, Lenovo ThinkBook, HP ProBook, ASUS ExpertBook B1, Acer TravelMate P2/B series
  CONSUMER: Dell Inspiron/XPS-consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook, Acer Aspire/Swift/Nitro, MSI consumer lines
 Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related. Dell naming: Pro Base = value, Pro Plus = mainstream, Pro Premium = flagship.
+Lenovo ThinkPad T-series/X13, HP EliteBook 6/8/X, and Dell Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
 A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.
 For brands or product lines not listed above, infer the tier from description and price positioning (vPro/3Y-onsite/TPM/"for Business" → commercial; consumer naming → consumer). If the tier cannot be determined, judge on specs alone, rate at most "partial", and state "tier unverified" in the reason.
+Ordering rule: output matches close first, then partial, then related. If more candidates qualify than the 12-match cap, drop the weakest partial/related matches first — never drop a close match to make room.
 Return at most 12 matches. Each reason must be 15 words or fewer. Respond with raw JSON only — no preamble, no commentary, no markdown fences.`;
 
 // ── Main judge call ───────────────────────────────────────────────────────
@@ -532,5 +534,30 @@ export async function callLlmJudge(
   // Drop any index not in the candidate list (hallucination guard)
   parsed.matches = (parsed.matches ?? []).filter((m) => validIndices.has(m.index));
 
+  // Deterministic backstop: sort close → partial → related regardless of model ordering.
+  parsed.matches = sortMatchesBySimilarity(parsed.matches);
+
   return parsed;
+}
+
+// ── Similarity sort ────────────────────────────────────────────────────────
+
+export const SIMILARITY_RANK: Record<string, number> = {
+  close:   0,
+  partial: 1,
+  related: 2,
+};
+
+/**
+ * Sort an array of matches by similarity rank: close first, partial second,
+ * related last. Stable within each tier (preserves model ordering).
+ */
+export function sortMatchesBySimilarity<T extends { similarity: string }>(
+  matches: T[],
+): T[] {
+  return [...matches].sort(
+    (a, b) =>
+      (SIMILARITY_RANK[a.similarity] ?? 99) -
+      (SIMILARITY_RANK[b.similarity] ?? 99),
+  );
 }

@@ -12,6 +12,8 @@ import {
   applyDeterministicGuard,
   buildTokenGroups,
   detectClassHint,
+  sortMatchesBySimilarity,
+  SIMILARITY_RANK,
 } from "./market-price-llm";
 
 // ── stripFences ────────────────────────────────────────────────────────────
@@ -506,5 +508,72 @@ describe("detectClassHint", () => {
 
   it("returns null for an empty string", () => {
     expect(detectClassHint("")).toBeNull();
+  });
+});
+
+// ── sortMatchesBySimilarity ────────────────────────────────────────────────
+
+describe("sortMatchesBySimilarity", () => {
+  it("orders close before partial before related", () => {
+    const input = [
+      { index: 0, similarity: "related", reason: "r" },
+      { index: 1, similarity: "close",   reason: "c" },
+      { index: 2, similarity: "partial", reason: "p" },
+    ];
+    const result = sortMatchesBySimilarity(input);
+    expect(result.map((m) => m.similarity)).toEqual(["close", "partial", "related"]);
+  });
+
+  it("is stable within each tier — preserves original order for same similarity", () => {
+    const input = [
+      { index: 0, similarity: "partial", reason: "first partial" },
+      { index: 1, similarity: "close",   reason: "only close" },
+      { index: 2, similarity: "partial", reason: "second partial" },
+      { index: 3, similarity: "related", reason: "only related" },
+    ];
+    const result = sortMatchesBySimilarity(input);
+    expect(result[0]!.similarity).toBe("close");
+    expect(result[1]!.index).toBe(0); // first partial stays before second
+    expect(result[2]!.index).toBe(2);
+    expect(result[3]!.similarity).toBe("related");
+  });
+
+  it("returns an empty array unchanged", () => {
+    expect(sortMatchesBySimilarity([])).toEqual([]);
+  });
+
+  it("leaves an already-sorted array unchanged in content", () => {
+    const input = [
+      { index: 0, similarity: "close",   reason: "a" },
+      { index: 1, similarity: "partial", reason: "b" },
+      { index: 2, similarity: "related", reason: "c" },
+    ];
+    expect(sortMatchesBySimilarity(input)).toEqual(input);
+  });
+
+  it("does not mutate the original array", () => {
+    const input = [
+      { index: 0, similarity: "related", reason: "r" },
+      { index: 1, similarity: "close",   reason: "c" },
+    ];
+    const original = [...input];
+    sortMatchesBySimilarity(input);
+    expect(input).toEqual(original);
+  });
+
+  it("SIMILARITY_RANK assigns 0/1/2 to close/partial/related", () => {
+    expect(SIMILARITY_RANK["close"]).toBe(0);
+    expect(SIMILARITY_RANK["partial"]).toBe(1);
+    expect(SIMILARITY_RANK["related"]).toBe(2);
+  });
+
+  it("treats unknown similarity as lowest (rank 99) — sorts to end", () => {
+    const input = [
+      { index: 0, similarity: "unknown", reason: "?" },
+      { index: 1, similarity: "close",   reason: "c" },
+    ];
+    const result = sortMatchesBySimilarity(input);
+    expect(result[0]!.similarity).toBe("close");
+    expect(result[1]!.similarity).toBe("unknown");
   });
 });
