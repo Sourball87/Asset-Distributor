@@ -45,13 +45,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/comparison", label: "Competition Check", icon: Grid },
     { href: "/insights", label: "Insights", icon: TrendingUp },
+    { href: "/market-price", label: "Market Price", icon: BarChart2 },
     ...(!isUser ? [{ href: "/import", label: "Import", icon: Upload }] : []),
   ];
 
   const experimentalItems = isAdmin
     ? [
         { href: "/movement", label: "Movement", icon: Activity },
-        { href: "/market-price", label: "Market Price", icon: BarChart2 },
       ]
     : [];
 

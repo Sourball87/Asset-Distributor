@@ -19,7 +19,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db, marketPriceCacheTable, productsTable } from "@workspace/db";
 import { eq, and, sql, gte } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAuth } from "../middlewares/auth";
 import {
   callLlmJudge,
   incrementAndCheckCap,
@@ -416,7 +416,7 @@ async function runPipeline(opts: {
 // ── GET /experimental/market-price/search-products ───────────────────────
 // Autocomplete: returns up to 20 products matching a VPN or description query.
 
-router.get("/experimental/market-price/search-products", requireAdmin, async (req, res): Promise<void> => {
+router.get("/experimental/market-price/search-products", requireAuth, async (req, res): Promise<void> => {
   const q = String(req.query.q ?? "").trim();
   if (q.length < 2) {
     res.json([]);
@@ -449,7 +449,7 @@ router.get("/experimental/market-price/search-products", requireAdmin, async (re
 
 // ── GET /experimental/market-price ────────────────────────────────────────
 
-router.get("/experimental/market-price", requireAdmin, async (req, res): Promise<void> => {
+router.get("/experimental/market-price", requireAuth, async (req, res): Promise<void> => {
   const parsed = GetMarketPriceQuery.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "productId (integer) is required" });
@@ -507,7 +507,7 @@ router.get("/experimental/market-price", requireAdmin, async (req, res): Promise
 
 // ── POST /experimental/market-price/by-spec ───────────────────────────────
 
-router.post("/experimental/market-price/by-spec", requireAdmin, async (req, res): Promise<void> => {
+router.post("/experimental/market-price/by-spec", requireAuth, async (req, res): Promise<void> => {
   const parsed = GetMarketPriceBySpecBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "specText (string, min 3 chars) is required" });

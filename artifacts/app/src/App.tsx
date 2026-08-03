@@ -168,7 +168,7 @@ function Router() {
       <Route path="/market-price">
         {() => (
           <Layout>
-            <AdminRoute component={MarketPrice} />
+            <MarketPrice />
           </Layout>
         )}
       </Route>
