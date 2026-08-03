@@ -266,6 +266,117 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
 }
 
 // ---------------------------------------------------------------------------
+// Single-SKU stacked view
+// ---------------------------------------------------------------------------
+
+interface SingleSkuViewProps {
+  row: FlatRow;
+  distributors: Distributor[];
+}
+
+function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
+  const baseline = distributors.find((d) => d.isBaseline);
+
+  return (
+    <div className="border rounded-sm overflow-hidden text-sm">
+      {/* Product header */}
+      <div className="bg-muted/40 px-4 py-2.5 border-b flex items-start gap-6">
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">VPN</span>
+          <span className="font-mono text-xs font-medium">{row.vpnDisplay}</span>
+        </div>
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">Brand</span>
+          <span className="text-xs">{row.brand}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">Description</span>
+          <span className="text-xs text-muted-foreground">{row.description}</span>
+        </div>
+      </div>
+
+      {/* Distributor rows */}
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b bg-card">
+            <th className="text-left px-4 py-2 font-semibold text-muted-foreground w-40">Distributor</th>
+            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-28">Price (ex)</th>
+            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-20">SOH</th>
+            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-24">Δ$</th>
+            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-20">Δ%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {distributors.map((d, i) => {
+            const isCurrent  = getIsCurrent(row, d.id);
+            const price      = row[`d${d.id}_price`]    as number | null;
+            const soh        = row[`d${d.id}_soh`]      as number | null;
+            const delta      = row[`d${d.id}_delta`]    as number | null;
+            const deltaPct   = row[`d${d.id}_deltaPct`] as number | null;
+            const snapDate   = getSnapshotDate(row, d.id);
+            const staleLabel = !isCurrent ? (snapDate ? `Last seen ${fmtDateDDMMYYYY(snapDate)}` : "No data") : null;
+
+            const cheapest = !d.isBaseline && row[`d${d.id}_cheapest`] as boolean;
+
+            return (
+              <tr key={d.id} className={`border-b last:border-0 ${i % 2 === 0 ? "" : "bg-muted/20"} ${cheapest ? "bg-green-50" : ""} ${row.dickerIsMostExpensive && d.isBaseline ? "bg-red-50" : ""}`}>
+                {/* Distributor name */}
+                <td className="px-4 py-2.5 font-medium">
+                  <span className={isCurrent ? "" : "text-muted-foreground/60"}>
+                    {d.name}{d.isBaseline ? " ★" : ""}
+                    {baseline && d.id === baseline.id && row.dickerIsMostExpensive && (
+                      <span className="ml-1.5 text-[10px] text-red-500 font-semibold">most expensive</span>
+                    )}
+                    {cheapest && (
+                      <span className="ml-1.5 text-[10px] text-green-600 font-semibold">cheapest</span>
+                    )}
+                  </span>
+                  {staleLabel && (
+                    <span className="block text-[10px] text-muted-foreground/60 font-normal">{staleLabel}</span>
+                  )}
+                </td>
+
+                {/* Price */}
+                <td className={`px-4 py-2.5 text-right font-mono ${isCurrent ? "" : "text-muted-foreground/40"}`}>
+                  {isCurrent ? fmtPrice(price) : "—"}
+                </td>
+
+                {/* SOH */}
+                <td className={`px-4 py-2.5 text-right font-mono ${isCurrent ? "" : "text-muted-foreground/40"}`}>
+                  {isCurrent ? fmtSoh(soh) : "—"}
+                </td>
+
+                {/* Δ$ */}
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {d.isBaseline || !isCurrent ? (
+                    <span className="text-muted-foreground/40">—</span>
+                  ) : (
+                    <span style={{ color: delta == null ? undefined : delta < 0 ? "#dc2626" : "#16a34a", fontWeight: delta != null ? 600 : undefined }}>
+                      {fmtDelta(delta)}
+                    </span>
+                  )}
+                </td>
+
+                {/* Δ% */}
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {d.isBaseline || !isCurrent ? (
+                    <span className="text-muted-foreground/40">—</span>
+                  ) : (
+                    <span style={{ color: deltaPct == null ? undefined : deltaPct < 0 ? "#dc2626" : "#16a34a" }}>
+                      {fmtDeltaPct(deltaPct)}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -548,30 +659,39 @@ export default function Comparison() {
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 min-h-0">
-        <AgGridReact
-          theme={gridTheme}
-          columnDefs={colDefs}
-          rowData={rowData}
-          rowClassRules={rowClassRules}
-          pagination
-          paginationPageSize={200}
-          paginationPageSizeSelector={[100, 200, 500, 1000]}
-          defaultColDef={{
-            resizable: true,
-            sortable: true,
-            suppressHeaderMenuButton: true,
-            filter: false,
-          }}
-          suppressMovableColumns
-          tooltipShowDelay={400}
-          loading={isLoading}
-          overlayNoRowsTemplate={
-            isLoading ? "Loading…" : "No products match the current filters."
-          }
-        />
-      </div>
+      {/* Single-SKU stacked view */}
+      {!isLoading && rowData.length === 1 && (
+        <div className="shrink-0">
+          <SingleSkuView row={rowData[0]} distributors={visibleDistributors} />
+        </div>
+      )}
+
+      {/* Grid — shown for 0 or 2+ results */}
+      {(isLoading || rowData.length !== 1) && (
+        <div className="flex-1 min-h-0">
+          <AgGridReact
+            theme={gridTheme}
+            columnDefs={colDefs}
+            rowData={rowData}
+            rowClassRules={rowClassRules}
+            pagination
+            paginationPageSize={200}
+            paginationPageSizeSelector={[100, 200, 500, 1000]}
+            defaultColDef={{
+              resizable: true,
+              sortable: true,
+              suppressHeaderMenuButton: true,
+              filter: false,
+            }}
+            suppressMovableColumns
+            tooltipShowDelay={400}
+            loading={isLoading}
+            overlayNoRowsTemplate={
+              isLoading ? "Loading…" : "No products match the current filters."
+            }
+          />
+        </div>
+      )}
 
       <style>{`
         .row-dicker-expensive {
