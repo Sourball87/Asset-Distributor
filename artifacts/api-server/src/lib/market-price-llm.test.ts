@@ -69,38 +69,6 @@ describe("extractJsonFromLlmText", () => {
   });
 });
 
-// ── content-block extraction (thinking + text) ────────────────────────────
-
-describe("content-block text extraction", () => {
-  it("joins all text blocks when the first block is a thinking block", () => {
-    // Simulate: response.content = [{type:"thinking",...},{type:"text",text:"..."}]
-    // The fix filters to text blocks and joins; extractJsonFromLlmText then parses.
-    const textBlocks = [{ type: "thinking", thinking: "Let me analyse..." }, { type: "text", text: '{"matches":[{"index":1,"similarity":"close","reason":"identical spec"}]}' }];
-    const rawText = textBlocks
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { type: "text"; text: string }).text)
-      .join("\n")
-      .trim();
-    expect(rawText).toBe('{"matches":[{"index":1,"similarity":"close","reason":"identical spec"}]}');
-    const parsed = extractJsonFromLlmText(rawText) as { matches: unknown[] };
-    expect(parsed.matches).toHaveLength(1);
-  });
-
-  it("joins multiple text blocks into one string before parsing", () => {
-    const textBlocks = [
-      { type: "text", text: '{"matches":[{"index":0,"similarity":"close","reason":"same tier"},' },
-      { type: "text", text: '{"index":1,"similarity":"partial","reason":"lower tier"}]}' },
-    ];
-    const rawText = textBlocks
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { type: "text"; text: string }).text)
-      .join("\n")
-      .trim();
-    // The joined string should be parseable via bracket extraction
-    const parsed = extractJsonFromLlmText(rawText) as { matches: unknown[] };
-    expect(parsed.matches).toHaveLength(2);
-  });
-});
 
 // ── makeQueryHash ──────────────────────────────────────────────────────────
 
@@ -128,13 +96,15 @@ describe("callLlmJudge — index guardrail", () => {
   });
 
   it("drops indices not in the candidate list", async () => {
-    // Mock Anthropic client response returning indices 0, 5 (5 is out of range for 3 candidates)
-    vi.doMock("@anthropic-ai/sdk", () => ({
+    // Mock OpenAI client response returning indices 0, 5 (5 is out of range for 3 candidates)
+    vi.doMock("openai", () => ({
       default: class {
-        messages = {
-          create: async () => ({
-            content: [{ type: "text", text: '{"matches":[{"index":0,"similarity":"close","reason":"r"},{"index":5,"similarity":"partial","reason":"x"}]}' }],
-          }),
+        chat = {
+          completions: {
+            create: async () => ({
+              choices: [{ message: { content: '{"matches":[{"index":0,"similarity":"close","reason":"r"},{"index":5,"similarity":"partial","reason":"x"}]}' }, finish_reason: "stop" }],
+            }),
+          },
         };
       },
     }));
@@ -160,12 +130,14 @@ describe("callLlmJudge — index guardrail", () => {
 
 describe("callLlmJudge — fenced JSON handling", () => {
   it("parses fenced JSON from LLM response", async () => {
-    vi.doMock("@anthropic-ai/sdk", () => ({
+    vi.doMock("openai", () => ({
       default: class {
-        messages = {
-          create: async () => ({
-            content: [{ type: "text", text: '```json\n{"matches":[{"index":0,"similarity":"close","reason":"matches"}]}\n```' }],
-          }),
+        chat = {
+          completions: {
+            create: async () => ({
+              choices: [{ message: { content: '```json\n{"matches":[{"index":0,"similarity":"close","reason":"matches"}]}\n```' }, finish_reason: "stop" }],
+            }),
+          },
         };
       },
     }));
@@ -194,12 +166,15 @@ describe("callLlmJudge — classHint in user message", () => {
   it("includes COMPONENT CONTEXT line when classHint is provided", async () => {
     let capturedContent = "";
 
-    vi.doMock("@anthropic-ai/sdk", () => ({
+    vi.doMock("openai", () => ({
       default: class {
-        messages = {
-          create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
-            capturedContent = opts.messages[0]?.content ?? "";
-            return { content: [{ type: "text", text: '{"matches":[]}' }] };
+        chat = {
+          completions: {
+            create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
+              // user message is at index 1 (system is at index 0)
+              capturedContent = opts.messages[1]?.content ?? "";
+              return { choices: [{ message: { content: '{"matches":[]}' }, finish_reason: "stop" }] };
+            },
           },
         };
       },
@@ -225,12 +200,15 @@ describe("callLlmJudge — classHint in user message", () => {
   it("omits COMPONENT CONTEXT line when classHint is null", async () => {
     let capturedContent = "";
 
-    vi.doMock("@anthropic-ai/sdk", () => ({
+    vi.doMock("openai", () => ({
       default: class {
-        messages = {
-          create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
-            capturedContent = opts.messages[0]?.content ?? "";
-            return { content: [{ type: "text", text: '{"matches":[]}' }] };
+        chat = {
+          completions: {
+            create: async (opts: { messages: Array<{ role: string; content: string }> }) => {
+              // user message is at index 1 (system is at index 0)
+              capturedContent = opts.messages[1]?.content ?? "";
+              return { choices: [{ message: { content: '{"matches":[]}' }, finish_reason: "stop" }] };
+            },
           },
         };
       },

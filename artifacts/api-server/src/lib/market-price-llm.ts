@@ -5,7 +5,7 @@
  * all distributor feeds, with market pricing."
  *
  * Design:
- * - Single Anthropic client, created lazily so the server still boots without
+ * - Single OpenAI client, created lazily so the server still boots without
  *   the key (the route guard will 503 before the client is used).
  * - 60-second AbortController timeout on every call.
  * - Strip ``` fences from the returned JSON.
@@ -14,7 +14,7 @@
  * - Model string is a single constant for easy swap.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import crypto from "crypto";
 import { logger } from "./logger";
 import { db } from "@workspace/db";
@@ -23,20 +23,20 @@ import { eq, sql } from "drizzle-orm";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const LLM_MODEL = "claude-sonnet-5";
+export const LLM_MODEL = "gpt-4o";
 export const DAILY_LLM_CAP = 100;
 const LLM_TIMEOUT_MS = 60_000;
 
-// ── Anthropic client (lazy) ────────────────────────────────────────────────
+// ── OpenAI client (lazy) ───────────────────────────────────────────────────
 
-let _client: Anthropic | null = null;
+let _client: OpenAI | null = null;
 
-function getClient(): Anthropic {
+function getClient(): OpenAI {
   if (!_client) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new LlmUnavailableError("ANTHROPIC_API_KEY is not configured");
+    if (!process.env.OPENAI_API_KEY) {
+      throw new LlmUnavailableError("OPENAI_API_KEY is not configured");
     }
-    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
   return _client;
 }
@@ -476,41 +476,36 @@ export async function callLlmJudge(
   let rawText: string;
   let stopReason: string | null = null;
   try {
-    const response = await client.messages.create(
+    const response = await client.chat.completions.create(
       {
         model: LLM_MODEL,
         max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user",   content: userMessage },
+        ],
       },
       { signal: controller.signal },
     );
-    stopReason = response.stop_reason;
-    const textBlocks = response.content.filter((b) => b.type === "text");
-    if (textBlocks.length === 0) {
-      logger.warn(
-        {
-          blockTypes: response.content.map((b) => b.type),
-          stopReason,
-          model: LLM_MODEL,
-        },
-        "LLM response contained no text blocks",
-      );
-    }
-    rawText = textBlocks.map((b) => (b as { type: "text"; text: string }).text).join("\n").trim();
+    const choice = response.choices[0];
+    stopReason = choice?.finish_reason ?? null;
+    rawText = choice?.message?.content ?? "";
   } catch (err: unknown) {
-    if (err instanceof Error && err.name === "AbortError") {
+    if (
+      err instanceof Error &&
+      (err.name === "AbortError" || err.name === "APIUserAbortError")
+    ) {
       throw new LlmUnavailableError("Matching service timed out after 60s");
     }
     throw new LlmUnavailableError(
-      `Anthropic API error: ${err instanceof Error ? err.message : String(err)}`,
+      `OpenAI API error: ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
     clearTimeout(timer);
   }
 
   // Detect hard truncation before attempting parse — response was cut mid-JSON
-  if (stopReason === "max_tokens") {
+  if (stopReason === "length") {
     logger.error(
       { rawTextLength: rawText.length, stopReason, model: LLM_MODEL },
       "LLM response truncated (max_tokens hit)",
