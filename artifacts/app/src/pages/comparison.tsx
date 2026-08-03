@@ -68,7 +68,7 @@ function fmtDeltaPct(v: number | null | undefined): string {
 /** Format an Ingram weekly sales estimate as "~N.N / wk" */
 function fmtWeeklySales(v: number | null | undefined): string {
   if (v == null) return "—";
-  return `~${v.toFixed(1)} / wk`;
+  return `~${Math.round(v)} / wk`;
 }
 
 /** Format an ISO date string (YYYY-MM-DD) as DD.MM.YYYY */
