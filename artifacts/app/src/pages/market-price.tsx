@@ -449,22 +449,17 @@ export default function MarketPrice() {
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">Market Price</h1>
-          <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-            Experimental
-          </Badge>
-        </div>
+        <h1 className="text-lg font-semibold tracking-tight">Market Price</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Search a SKU and see comparable products from other brands across all distributor feeds, with market pricing.
         </p>
       </div>
 
-      {/* Experimental banner */}
-      <div className="flex items-start gap-2 border border-yellow-300 bg-yellow-50 rounded-sm px-3 py-2 text-xs text-yellow-800">
+      {/* Info banner */}
+      <div className="flex items-start gap-2 border border-border bg-muted/40 rounded-sm px-3 py-2 text-xs text-muted-foreground">
         <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <span>
-          Experimental — matches are AI-suggested from catalogue descriptions. Verify specs before quoting.
+          Matches are AI-suggested from catalogue descriptions. Verify specs before quoting.
         </span>
       </div>
 
