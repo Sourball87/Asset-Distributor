@@ -171,17 +171,6 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       maxWidth: 360,
       tooltipField: "description",
     },
-    {
-      field: "ingramWeeklySales",
-      headerName: "Wkly Sales",
-      headerTooltip: "Ingram Micro estimated weekly unit sell-through (last 30 days)",
-      pinned: "left",
-      width: 100,
-      type: "rightAligned",
-      cellStyle: { ...MONO, color: "#6366f1" },
-      valueFormatter: (p: ValueFormatterParams) => fmtWeeklySales(p.value as number | null),
-      comparator: (a: number | null, b: number | null) => (a ?? -1) - (b ?? -1),
-    },
   ];
 
   const distGroups: ColGroupDef[] = distributors.map((d) => {
@@ -276,9 +265,31 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       comparator: (a: number | null, b: number | null) => (a ?? 0) - (b ?? 0),
     };
 
+    const children: ColDef[] = [priceCol, sohCol, deltaCol, deltaPctCol];
+
+    // For Ingram Micro, append the weekly sell-through estimate column.
+    if (d.name.toLowerCase().includes("ingram")) {
+      children.push({
+        field: "ingramWeeklySales",
+        headerName: "Wkly Sales",
+        headerTooltip: "Ingram Micro estimated weekly unit sell-through (last 30 days)",
+        width: 96,
+        type: "rightAligned",
+        cellStyle: (p: CellClassParams): CellStyle => {
+          if (!getIsCurrent(p.data as FlatRow, d.id)) return STALE_MONO;
+          return { ...MONO, color: "#6366f1" };
+        },
+        valueFormatter: (p: ValueFormatterParams) => {
+          if (!getIsCurrent(p.data as FlatRow, d.id)) return "—";
+          return fmtWeeklySales(p.value as number | null);
+        },
+        comparator: (a: number | null, b: number | null) => (a ?? -1) - (b ?? -1),
+      });
+    }
+
     return {
       headerName: d.name,
-      children: [priceCol, sohCol, deltaCol, deltaPctCol],
+      children,
     };
   });
 
@@ -306,12 +317,12 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-32">VPN</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-20">Brand</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-72">Description</th>
-            <th className="text-right px-3 py-1.5 font-semibold text-[11px] w-24" style={{ color: "#6366f1" }} title="Ingram Micro estimated weekly unit sell-through (last 30 days)">Wkly Sales</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-28">Distributor</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Price (ex)</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">SOH</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-20">Δ$</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">Δ%</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-[11px] w-24" style={{ color: "#6366f1" }} title="Ingram Micro estimated weekly unit sell-through (last 30 days)">Wkly Sales</th>
           </tr>
         </thead>
         <tbody>
@@ -339,9 +350,6 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
                     </td>
                     <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] text-muted-foreground border-r border-border/50 max-w-[288px] break-words">
                       {row.description}
-                    </td>
-                    <td rowSpan={n} className="px-3 py-1.5 align-top text-right font-mono text-[11px] font-semibold border-r border-border/50 whitespace-nowrap" style={{ color: row.ingramWeeklySales != null ? "#6366f1" : undefined }}>
-                      {fmtWeeklySales(row.ingramWeeklySales)}
                     </td>
                   </>
                 )}
@@ -391,6 +399,17 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
                     <span style={{ color: deltaPct == null ? undefined : deltaPct < 0 ? "#dc2626" : "#16a34a" }}>
                       {fmtDeltaPct(deltaPct)}
                     </span>
+                  )}
+                </td>
+
+                {/* Wkly Sales — value shown on Ingram's row only */}
+                <td className="px-3 py-1.5 text-right font-mono text-[11px]">
+                  {d.name.toLowerCase().includes("ingram") ? (
+                    <span style={{ color: row.ingramWeeklySales != null ? "#6366f1" : undefined }}>
+                      {fmtWeeklySales(row.ingramWeeklySales)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/20">—</span>
                   )}
                 </td>
               </tr>
