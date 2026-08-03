@@ -280,12 +280,12 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
 
   return (
     <div className="border rounded-sm overflow-hidden">
-      <table className="w-full text-xs border-collapse">
+      <table className="text-xs border-collapse">
         <thead>
           <tr className="bg-card border-b">
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-32">VPN</th>
-            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Brand</th>
-            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px]">Description</th>
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-20">Brand</th>
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-72">Description</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-28">Distributor</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Price (ex)</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">SOH</th>
@@ -316,7 +316,7 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
                     <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] border-r border-border/50 whitespace-nowrap">
                       {row.brand}
                     </td>
-                    <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] text-muted-foreground border-r border-border/50">
+                    <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] text-muted-foreground border-r border-border/50 max-w-[288px] break-words">
                       {row.description}
                     </td>
                   </>
