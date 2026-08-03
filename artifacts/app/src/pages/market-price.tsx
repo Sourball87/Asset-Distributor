@@ -125,9 +125,15 @@ function DistributorPriceCell({
 }
 
 function ResultsTable({ result }: { result: MarketPriceResult }) {
-  // Collect all distributor IDs that appear in any match
+  // Collect all distributor IDs from both source and matches so columns align.
   const distIds: number[] = [];
   const distNames = new Map<number, string>();
+  for (const p of result.source.prices) {
+    if (!distNames.has(p.distributorId)) {
+      distIds.push(p.distributorId);
+      distNames.set(p.distributorId, p.distributorName);
+    }
+  }
   for (const m of result.matches) {
     for (const p of m.prices) {
       if (!distNames.has(p.distributorId)) {
@@ -150,6 +156,27 @@ function ResultsTable({ result }: { result: MarketPriceResult }) {
               <th key={id} className="px-3 py-2 text-right">
                 {distNames.get(id)}
               </th>
+            ))}
+          </tr>
+          {/* Source product — pinned as the first row inside thead so it stays visually anchored */}
+          <tr className="border-t-2 border-b-2 border-primary/20 bg-primary/5 text-xs">
+            <td className="px-3 py-2 font-bold">{result.source.brand ?? "—"}</td>
+            <td className="px-3 py-2 font-mono font-semibold">{result.source.vpnDisplay ?? "—"}</td>
+            <td className="px-3 py-2 text-muted-foreground max-w-xs">
+              <div className="line-clamp-2">{result.source.description}</div>
+            </td>
+            <td className="px-3 py-2">
+              <span className="inline-block px-1.5 py-0.5 rounded-sm border text-[10px] font-semibold uppercase tracking-wide bg-primary/10 text-primary border-primary/30">
+                Source
+              </span>
+            </td>
+            {distIds.map((id) => (
+              <DistributorPriceCell
+                key={id}
+                prices={result.source.prices}
+                distributorId={id}
+                cheapestId={null}
+              />
             ))}
           </tr>
         </thead>
@@ -500,10 +527,10 @@ export default function MarketPrice() {
             </span>
           </div>
 
-          <SourceCard source={result.source} />
+          <ResultsTable result={result} />
 
-          {result.matches.length === 0 ? (
-            <div className="border border-border rounded-sm px-4 py-8 text-center bg-card space-y-1">
+          {result.matches.length === 0 && (
+            <div className="border border-border rounded-sm px-4 py-6 text-center bg-card space-y-1">
               <div className="text-sm text-muted-foreground">
                 {result.notCoveredMessage ?? "No comparable products found in current feeds."}
               </div>
@@ -513,8 +540,6 @@ export default function MarketPrice() {
                 </div>
               )}
             </div>
-          ) : (
-            <ResultsTable result={result} />
           )}
         </div>
       )}
