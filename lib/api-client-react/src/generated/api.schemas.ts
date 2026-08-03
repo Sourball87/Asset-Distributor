@@ -286,6 +286,11 @@ export interface ComparisonRow {
   /** @nullable */
   cheapestCompetitorId: number | null;
   dickerIsMostExpensive: boolean;
+  /**
+     * Ingram Micro estimated weekly unit sell-through (last 30 days, normalised to 7-day rate). Null when fewer than 2 snapshots or fewer than 7 days of data are available for this SKU.
+     * @nullable
+     */
+  ingramWeeklySales?: number | null;
 }
 
 export type ComparisonResultFreshnessWarningsItem = {

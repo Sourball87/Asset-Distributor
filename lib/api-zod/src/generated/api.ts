@@ -517,7 +517,8 @@ export const GetComparisonResponse = zod.object({
   "priceDeltaPct": zod.number().nullish()
 })),
   "cheapestCompetitorId": zod.number().nullable(),
-  "dickerIsMostExpensive": zod.boolean()
+  "dickerIsMostExpensive": zod.boolean(),
+  "ingramWeeklySales": zod.number().nullish().describe('Ingram Micro estimated weekly unit sell-through (last 30 days, normalised to 7-day rate). Null when fewer than 2 snapshots or fewer than 7 days of data are available for this SKU.\n')
 })),
   "distributors": zod.array(zod.object({
   "id": zod.number(),

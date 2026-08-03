@@ -21,12 +21,13 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
 
   // ── Single CTE query ────────────────────────────────────────────────────────
   type QueryRow = {
-    product_id:     number;
-    vpn_normalized: string;
-    vpn_display:    string;
-    brand:          string;
-    description:    string;
-    total_count:    number;
+    product_id:          number;
+    vpn_normalized:      string;
+    vpn_display:         string;
+    brand:               string;
+    description:         string;
+    total_count:         number;
+    ingram_weekly_est:   string | null;
     distributor_data: Array<{
       distributorId:   number;
       distributorName: string;
@@ -86,6 +87,48 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
         FROM stock_snapshots ss
         WHERE ss.product_id IN (SELECT id FROM paged_products)
         ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
+      ),
+      -- Ingram Micro weekly sell-through estimate (last 30 days, normalised to 7-day rate)
+      -- Uses same LAG(soh)/LAG(soo) logic as the movement classifier.
+      ingram_dist AS (
+        SELECT id FROM distributors WHERE LOWER(name) LIKE '%ingram%' LIMIT 1
+      ),
+      ingram_ordered AS (
+        SELECT
+          ss.product_id,
+          ss.soh,
+          ss.soo,
+          ss.snapshot_date,
+          LAG(ss.soh) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soh,
+          LAG(ss.soo) OVER (PARTITION BY ss.product_id ORDER BY ss.snapshot_date) AS prev_soo
+        FROM stock_snapshots ss
+        WHERE ss.distributor_id = (SELECT id FROM ingram_dist)
+          AND ss.snapshot_date >= CURRENT_DATE - INTERVAL '30 days'
+          AND ss.product_id IN (SELECT id FROM paged_products)
+      ),
+      ingram_weekly AS (
+        SELECT
+          product_id,
+          CASE
+            WHEN COUNT(*) >= 2
+              AND (MAX(snapshot_date) - MIN(snapshot_date)) >= 7
+            THEN
+              COALESCE(SUM(
+                CASE
+                  WHEN soh - prev_soh < 0
+                    THEN -(soh - prev_soh)
+                  WHEN soh - prev_soh > 0
+                    AND (COALESCE(soo, 0) - COALESCE(prev_soo, 0)) < 0
+                    THEN GREATEST(0, -(COALESCE(soo, 0) - COALESCE(prev_soo, 0)) - (soh - prev_soh))
+                  ELSE 0
+                END
+              ) FILTER (WHERE prev_soh IS NOT NULL AND soh IS NOT NULL), 0)
+              * 7.0
+              / GREATEST(1, MAX(snapshot_date) - MIN(snapshot_date))
+            ELSE NULL
+          END AS weekly_est
+        FROM ingram_ordered
+        GROUP BY product_id
       )
     SELECT
       pp.id            AS product_id,
@@ -94,6 +137,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       pp.brand,
       pp.description,
       t.cnt            AS total_count,
+      MAX(iw.weekly_est) AS ingram_weekly_est,
       json_agg(
         json_build_object(
           'distributorId',   d.id,
@@ -114,6 +158,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
     CROSS JOIN distributors d
     LEFT JOIN latest_ss l ON l.product_id = pp.id AND l.distributor_id = d.id
     LEFT JOIN distributor_current_dates dcd ON dcd.distributor_id = d.id
+    LEFT JOIN ingram_weekly iw ON iw.product_id = pp.id
     CROSS JOIN total t
     GROUP BY pp.id, pp.vpn_normalized, pp.vpn_display, pp.brand, pp.description, t.cnt
     ORDER BY pp.brand, pp.vpn_normalized
@@ -205,6 +250,10 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       cheapestCompetitorPrice != null &&
       dickerPrice > cheapestCompetitorPrice;
 
+    const ingramWeeklySales = row.ingram_weekly_est != null
+      ? parseFloat(String(row.ingram_weekly_est))
+      : null;
+
     return {
       productId:            row.product_id,
       vpnNormalized:        row.vpn_normalized,
@@ -214,6 +263,7 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
       distributors,
       cheapestCompetitorId,
       dickerIsMostExpensive,
+      ingramWeeklySales,
     };
   });
 

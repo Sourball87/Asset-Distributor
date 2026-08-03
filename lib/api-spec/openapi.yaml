@@ -1301,6 +1301,12 @@ components:
           type: ["integer", "null"]
         dickerIsMostExpensive:
           type: boolean
+        ingramWeeklySales:
+          type: ["number", "null"]
+          description: >
+            Ingram Micro estimated weekly unit sell-through (last 30 days,
+            normalised to 7-day rate). Null when fewer than 2 snapshots or
+            fewer than 7 days of data are available for this SKU.
 
     ComparisonResult:
       type: object

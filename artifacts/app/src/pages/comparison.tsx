@@ -65,6 +65,12 @@ function fmtDeltaPct(v: number | null | undefined): string {
   return `${v >= 0 ? "+" : ""}${Math.round(v)}%`;
 }
 
+/** Format an Ingram weekly sales estimate as "~N.N / wk" */
+function fmtWeeklySales(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `~${v.toFixed(1)} / wk`;
+}
+
 /** Format an ISO date string (YYYY-MM-DD) as DD.MM.YYYY */
 function fmtDateDDMMYYYY(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -86,6 +92,8 @@ type FlatRow = {
   cheapestCompetitorId: number | null;
   /** True when every distributor's snapshot is stale (none are current). */
   allStale: boolean;
+  /** Ingram Micro estimated weekly unit sell-through, or null if insufficient data. */
+  ingramWeeklySales: number | null;
   [key: string]: unknown;
 };
 
@@ -99,6 +107,7 @@ function flattenRows(rows: ComparisonRow[]): FlatRow[] {
       dickerIsMostExpensive: row.dickerIsMostExpensive,
       cheapestCompetitorId: row.cheapestCompetitorId ?? null,
       allStale: row.distributors.every((d) => !d.isCurrent),
+      ingramWeeklySales: row.ingramWeeklySales ?? null,
     };
     for (const d of row.distributors) {
       flat[`d${d.distributorId}_price`]        = d.sellPrice ?? null;
@@ -161,6 +170,17 @@ function buildColumns(distributors: Distributor[]): (ColDef | ColGroupDef)[] {
       minWidth: 160,
       maxWidth: 360,
       tooltipField: "description",
+    },
+    {
+      field: "ingramWeeklySales",
+      headerName: "Wkly Sales",
+      headerTooltip: "Ingram Micro estimated weekly unit sell-through (last 30 days)",
+      pinned: "left",
+      width: 100,
+      type: "rightAligned",
+      cellStyle: { ...MONO, color: "#6366f1" },
+      valueFormatter: (p: ValueFormatterParams) => fmtWeeklySales(p.value as number | null),
+      comparator: (a: number | null, b: number | null) => (a ?? -1) - (b ?? -1),
     },
   ];
 
@@ -286,6 +306,7 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-32">VPN</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-20">Brand</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-72">Description</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-[11px] w-24" style={{ color: "#6366f1" }} title="Ingram Micro estimated weekly unit sell-through (last 30 days)">Wkly Sales</th>
             <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-28">Distributor</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Price (ex)</th>
             <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">SOH</th>
@@ -318,6 +339,9 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
                     </td>
                     <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] text-muted-foreground border-r border-border/50 max-w-[288px] break-words">
                       {row.description}
+                    </td>
+                    <td rowSpan={n} className="px-3 py-1.5 align-top text-right font-mono text-[11px] font-semibold border-r border-border/50 whitespace-nowrap" style={{ color: row.ingramWeeklySales != null ? "#6366f1" : undefined }}>
+                      {fmtWeeklySales(row.ingramWeeklySales)}
                     </td>
                   </>
                 )}
