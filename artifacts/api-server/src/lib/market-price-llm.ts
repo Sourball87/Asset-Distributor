@@ -227,6 +227,91 @@ export function extractCpuFamily(desc: string): string | null {
   return null;
 }
 
+// ── Product-family tier lookup ─────────────────────────────────────────────
+
+export type ProductTier = "flagship" | "mainstream" | "value" | "consumer";
+
+/**
+ * Ordered tier lookup — first match wins.
+ * Patterns are tested case-insensitively against the full product description.
+ * FLAGSHIP entries must precede MAINSTREAM so e.g. "ThinkPad X1 Yoga" →
+ * flagship before the bare "yoga" consumer pattern fires.
+ */
+export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> = [
+  // ── FLAGSHIP ────────────────────────────────────────────────────────────
+  {
+    tier: "flagship",
+    patterns: [
+      /thinkpad\s+x1\b/i,       // X1 Carbon, X1 Yoga, X1 Extreme, X1 Nano
+      /thinkpad\s+x9\b/i,       // X9 series
+      /elitebook\s+ultra/i,     // HP EliteBook Ultra
+      /dragonfly/i,             // HP EliteBook Dragonfly
+      /pro\w*\s+premium/i,      // Dell Pro Premium / Pro14 Premium (new naming)
+      /latitude\s+9\d{3}/i,     // Dell Latitude 9xxx (legacy naming)
+    ],
+  },
+  // ── MAINSTREAM COMMERCIAL ───────────────────────────────────────────────
+  {
+    tier: "mainstream",
+    patterns: [
+      /thinkpad\s+t\d/i,        // T14, T14S, T15, T16, T13 …
+      /thinkpad\s+x13\b/i,      // X13 (not X1, not X9)
+      /elitebook\s+6\b/i,       // HP EliteBook 6 series
+      /elitebook\s+8\b/i,       // HP EliteBook 8 series
+      /elitebook\s+x\b/i,       // HP EliteBook X (non-Ultra)
+      /\bpro\s*(?:plus|1[46]\s*plus|16\s*plus)\b/i, // Dell Pro Plus / Pro14 Plus / Pro16 Plus
+      /latitude\s+[57]\d{3}/i,  // Dell Latitude 5xxx / 7xxx (legacy)
+      /expertbook\s+b5/i,
+      /travelmate\s+p[46]/i,
+      /surface\s+laptop/i,
+      /surface\s+pro\b/i,
+    ],
+  },
+  // ── VALUE COMMERCIAL ────────────────────────────────────────────────────
+  {
+    tier: "value",
+    patterns: [
+      /thinkpad\s+e\d/i,        // ThinkPad E series
+      /thinkpad\s+l\d/i,        // ThinkPad L series
+      /thinkbook/i,             // Lenovo ThinkBook (not ThinkPad)
+      /probook/i,               // HP ProBook
+      /expertbook\s+b1/i,
+      /travelmate\s+p2/i,
+      /travelmate\s+b\d/i,
+      /\bpro\s*base\b/i,        // Dell Pro Base (new naming)
+      /latitude\s+3\d{3}/i,     // Dell Latitude 3xxx (legacy)
+    ],
+  },
+  // ── CONSUMER ────────────────────────────────────────────────────────────
+  {
+    tier: "consumer",
+    patterns: [
+      /ideapad/i,
+      /\byoga\b/i,              // standalone Yoga (ThinkPad X1 Yoga already caught above)
+      /pavilion/i,
+      /\benvy\b/i,
+      /inspiron/i,
+      /vivobook/i,
+      /zenbook/i,
+      /\baspire\b/i,
+      /\bswift\b/i,
+      /\bnitro\b/i,
+    ],
+  },
+];
+
+/**
+ * Detect the commercial tier of a product from its description.
+ * Returns null when the family is not in the known map — callers treat this as
+ * "unknown; trust the LLM" rather than forcing a demotion.
+ */
+export function detectProductTier(desc: string): ProductTier | null {
+  for (const { patterns, tier } of FAMILY_TIER_MAP) {
+    if (patterns.some((p) => p.test(desc))) return tier;
+  }
+  return null;
+}
+
 // ── Deterministic guard ────────────────────────────────────────────────────
 
 export interface GuardableMatch {
@@ -235,35 +320,63 @@ export interface GuardableMatch {
   reason: string;
 }
 
+/** Human-readable label for a ProductTier value. */
+function tierLabel(t: ProductTier): string {
+  return {
+    flagship:    "flagship",
+    mainstream:  "mainstream commercial",
+    value:       "value commercial",
+    consumer:    "consumer",
+  }[t];
+}
+
 /**
- * Post-processing guard: demote "close" → "partial" when CPU tier or form
- * factor can be extracted from BOTH source and candidate descriptions and they
- * differ.  Never upgrades; never touches "related".  Token not extractable from
- * either side → no demotion (safe fallback).
+ * Post-processing guard: demote "close" → "partial" when CPU tier, form
+ * factor, OR product-family tier can be extracted from BOTH source and
+ * candidate descriptions and they differ.
+ *
+ * Never upgrades; never touches "partial" or "related".
+ * Token / tier not extractable from either side → no demotion (safe fallback).
+ *
+ * Product-tier demotion covers the two cases the prompt most often gets wrong:
+ *   • FLAGSHIP candidate (X1 Carbon, EliteBook Ultra …) vs MAINSTREAM source
+ *     → reason includes "(premium alternative)"
+ *   • VALUE/CONSUMER candidate vs MAINSTREAM source → reason states tier gap
  */
 export function applyDeterministicGuard<T extends GuardableMatch>(
   sourceDesc: string,
   matches: T[],
 ): T[] {
-  const sourceFf = extractFormFactor(sourceDesc);
-  const sourceCpu = extractCpuFamily(sourceDesc);
+  const sourceFf   = extractFormFactor(sourceDesc);
+  const sourceCpu  = extractCpuFamily(sourceDesc);
+  const sourceTier = detectProductTier(sourceDesc);
 
   return matches.map((m) => {
     if (m.similarity !== "close") return m; // only "close" can be demoted
 
-    const candidateFf = extractFormFactor(m.description);
-    const candidateCpu = extractCpuFamily(m.description);
+    const candidateFf   = extractFormFactor(m.description);
+    const candidateCpu  = extractCpuFamily(m.description);
+    const candidateTier = detectProductTier(m.description);
 
     const ffDiffers =
       sourceFf != null && candidateFf != null && sourceFf !== candidateFf;
     const cpuDiffers =
       sourceCpu != null && candidateCpu != null && sourceCpu !== candidateCpu;
+    const tierDiffers =
+      sourceTier != null && candidateTier != null && sourceTier !== candidateTier;
 
-    if (!ffDiffers && !cpuDiffers) return m;
+    if (!ffDiffers && !cpuDiffers && !tierDiffers) return m;
 
     const tags: string[] = [];
-    if (ffDiffers) tags.push("form-factor differs");
-    if (cpuDiffers) tags.push("tier differs");
+    if (ffDiffers)  tags.push("form-factor differs");
+    if (cpuDiffers) tags.push("CPU tier differs");
+    if (tierDiffers) {
+      const isPremium = candidateTier === "flagship" && sourceTier === "mainstream";
+      tags.push(
+        `product tier: ${tierLabel(candidateTier)} vs ${tierLabel(sourceTier)} source` +
+        (isPremium ? " (premium alternative)" : ""),
+      );
+    }
 
     return {
       ...m,
@@ -435,6 +548,8 @@ Product-line tier rule: Consider product-line positioning, not just specs. Vendo
  CONSUMER: Dell Inspiron/XPS-consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook, Acer Aspire/Swift/Nitro, MSI consumer lines
 Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related. Dell naming: Pro Base = value, Pro Plus = mainstream, Pro Premium = flagship.
 Lenovo ThinkPad T-series/X13, HP EliteBook 6/8/X, and Dell Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
+ThinkPad T14 and T14S are the same product family at the same mainstream tier — never rate T14S lower than T14 or below mainstream commercial.
+FLAGSHIP products (X1 Carbon, X9, EliteBook Ultra, Dragonfly, Dell Pro Premium) against a MAINSTREAM source must be rated "partial" as a premium alternative — never "close", regardless of how well the specs align.
 A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.
 For brands or product lines not listed above, infer the tier from description and price positioning (vPro/3Y-onsite/TPM/"for Business" → commercial; consumer naming → consumer). If the tier cannot be determined, judge on specs alone, rate at most "partial", and state "tier unverified" in the reason.
 Ordering rule: output matches close first, then partial, then related. If more candidates qualify than the 12-match cap, drop the weakest partial/related matches first — never drop a close match to make room.

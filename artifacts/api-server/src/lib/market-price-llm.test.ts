@@ -14,6 +14,8 @@ import {
   detectClassHint,
   sortMatchesBySimilarity,
   SIMILARITY_RANK,
+  detectProductTier,
+  FAMILY_TIER_MAP,
 } from "./market-price-llm";
 
 // ── stripFences ────────────────────────────────────────────────────────────
@@ -320,7 +322,7 @@ describe("applyDeterministicGuard", () => {
       m("ASUS ExpertCentre D701S SFF PC, Intel Core i5-14500, DDR5 16GB, 512GB, W11P, 3Y", "close"),
     ]);
     expect(result[0]!.similarity).toBe("partial");
-    expect(result[0]!.reason).toContain("[tier differs]");
+    expect(result[0]!.reason).toContain("[CPU tier differs]");
   });
 
   it("demotes close→partial when form factors differ (MFF vs SFF)", () => {
@@ -508,6 +510,162 @@ describe("detectClassHint", () => {
 
   it("returns null for an empty string", () => {
     expect(detectClassHint("")).toBeNull();
+  });
+});
+
+// ── detectProductTier ─────────────────────────────────────────────────────
+
+describe("detectProductTier", () => {
+  // FLAGSHIP
+  it("detects ThinkPad X1 Carbon as flagship", () => {
+    expect(detectProductTier("LENOVO THINKPAD X1 CARBON GEN12 U7-258V 32GB 1TB")).toBe("flagship");
+  });
+  it("detects ThinkPad X9 as flagship", () => {
+    expect(detectProductTier("LENOVO THINKPAD X9 AURA GEN1 U7")).toBe("flagship");
+  });
+  it("detects EliteBook Ultra as flagship", () => {
+    expect(detectProductTier("HP ELITEBOOK ULTRA G1I 14 U7-268V 32GB 1TB W11P")).toBe("flagship");
+  });
+  it("detects HP Dragonfly as flagship", () => {
+    expect(detectProductTier("HP ELITEBOOK DRAGONFLY G4 I7-1365U 32GB W11P")).toBe("flagship");
+  });
+  it("detects Dell Pro Premium as flagship", () => {
+    expect(detectProductTier("DELL PRO14 PREMIUM NOTEBOOK 14 U7-268V 32GB W11P 3Y PRO")).toBe("flagship");
+  });
+
+  // MAINSTREAM COMMERCIAL
+  it("detects ThinkPad T14 as mainstream", () => {
+    expect(detectProductTier("LENOVO THINKPAD T14 GEN6 U7-155U 16GB 512GB W11P")).toBe("mainstream");
+  });
+  it("detects ThinkPad T14S as mainstream", () => {
+    expect(detectProductTier("LENOVO THINKPAD T14S GEN6 U7-268V 32GB 1TB W11P")).toBe("mainstream");
+  });
+  it("detects ThinkPad X13 as mainstream (not flagship)", () => {
+    expect(detectProductTier("LENOVO THINKPAD X13 GEN5 U5-125U 16GB 512GB W11P")).toBe("mainstream");
+  });
+  it("detects HP EliteBook 6 as mainstream", () => {
+    expect(detectProductTier("HP ELITEBOOK 6 G1I 14 U7-255U 16GB 512GB W11P 3Y")).toBe("mainstream");
+  });
+  it("detects HP EliteBook 8 as mainstream", () => {
+    expect(detectProductTier("HP ELITEBOOK 8 G1I 16 U7-256V 32GB 1TB W11P")).toBe("mainstream");
+  });
+  it("detects HP EliteBook X as mainstream", () => {
+    expect(detectProductTier("HP ELITEBOOK X G11 14 U5-226V 16GB 512GB W11P")).toBe("mainstream");
+  });
+  it("detects Dell Pro Plus as mainstream", () => {
+    expect(detectProductTier("DELL PRO14 PLUS NOTEBOOK 14 FHD U7-268V 32GB W11P 3Y PRO")).toBe("mainstream");
+  });
+
+  // VALUE COMMERCIAL
+  it("detects ThinkPad E as value", () => {
+    expect(detectProductTier("LENOVO THINKPAD E16 GEN2 U5-125U 16GB 512GB W11P")).toBe("value");
+  });
+  it("detects ThinkPad L as value", () => {
+    expect(detectProductTier("LENOVO THINKPAD L14 GEN5 AMD RYZEN 5 16GB 512GB W11P")).toBe("value");
+  });
+  it("detects ThinkBook as value", () => {
+    expect(detectProductTier("LENOVO THINKBOOK 14X G1 U5-226V 16GB 512GB W11P 1YOS")).toBe("value");
+  });
+  it("detects HP ProBook as value", () => {
+    expect(detectProductTier("HP PROBOOK 440 G11 14 WUXGA U5-125U 16GB 512GB W11P")).toBe("value");
+  });
+
+  // CONSUMER
+  it("detects IdeaPad as consumer", () => {
+    expect(detectProductTier("LENOVO IDEAPAD SLIM 5 U5-125U 16GB 512GB W11H")).toBe("consumer");
+  });
+  it("detects HP Pavilion as consumer", () => {
+    expect(detectProductTier("HP PAVILION PLUS 14 OLED U7-155H 16GB 512GB W11H")).toBe("consumer");
+  });
+  it("detects HP Envy as consumer", () => {
+    expect(detectProductTier("HP ENVY X360 14 U7-155U 16GB 512GB W11H")).toBe("consumer");
+  });
+
+  // FLAGSHIP takes priority over consumer "yoga"
+  it("detects ThinkPad X1 Yoga as flagship (not consumer)", () => {
+    expect(detectProductTier("LENOVO THINKPAD X1 YOGA GEN9 U7-268V 32GB 1TB W11P")).toBe("flagship");
+  });
+
+  // Unknown
+  it("returns null for an unknown product line", () => {
+    expect(detectProductTier("ACME WIDGET PRO 16GB 512GB W11P")).toBeNull();
+  });
+  it("returns null for an empty string", () => {
+    expect(detectProductTier("")).toBeNull();
+  });
+
+  // FAMILY_TIER_MAP has entries
+  it("FAMILY_TIER_MAP covers all four tiers", () => {
+    const tiers = new Set(FAMILY_TIER_MAP.map((e) => e.tier));
+    expect(tiers).toContain("flagship");
+    expect(tiers).toContain("mainstream");
+    expect(tiers).toContain("value");
+    expect(tiers).toContain("consumer");
+  });
+});
+
+// ── applyDeterministicGuard — tier-based demotion ─────────────────────────
+
+describe("applyDeterministicGuard — product-tier enforcement", () => {
+  const sourceMainstream =
+    "DELL PRO14 PLUS NOTEBOOK, 14\" FHD+ IR, U7-268V, 32GB, 512GB, WL, W11P(CP+) 3Y PRO";
+
+  const m = (description: string, similarity: "close" | "partial" | "related", reason = "test") =>
+    ({ description, similarity, reason });
+
+  it("demotes X1 Carbon from close → partial (flagship vs mainstream source)", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("LENOVO THINKPAD X1 CARBON GEN12 U7-268V 32GB 1TB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toContain("flagship");
+    expect(result[0]!.reason).toContain("premium alternative");
+  });
+
+  it("does NOT demote T14S — same mainstream tier as source", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("LENOVO THINKPAD T14S GEN6 U7-268V 32GB 1TB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  it("does NOT demote EliteBook 6 — same mainstream tier as source", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("HP ELITEBOOK 6 G1I 14 U7-255U 32GB 512GB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  it("demotes EliteBook Ultra from close → partial (flagship vs mainstream)", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("HP ELITEBOOK ULTRA G1I 14 U7-268V 32GB 1TB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toContain("flagship");
+  });
+
+  it("demotes ThinkBook from close → partial (value vs mainstream source)", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("LENOVO THINKBOOK 14X G1 U7-268V 32GB 512GB W11P 1YOS", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toContain("value commercial");
+  });
+
+  it("does not demote when candidate tier is unknown (unknown brands stay as-is)", () => {
+    const result = applyDeterministicGuard(sourceMainstream, [
+      m("ACME BUSINESS PRO 14 U7-268V 32GB 512GB W11P 3Y", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  it("does not demote when source tier is unknown", () => {
+    const unknownSource = "GENERIC NOTEBOOK 14 U7-268V 32GB 512GB W11P";
+    const result = applyDeterministicGuard(unknownSource, [
+      m("LENOVO THINKPAD X1 CARBON GEN12 U7-268V 32GB 1TB W11P", "close"),
+    ]);
+    // source tier unknown → no tier demotion; CPU same → no CPU demotion
+    expect(result[0]!.similarity).toBe("close");
   });
 });
 
