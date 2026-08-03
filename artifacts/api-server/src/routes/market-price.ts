@@ -30,8 +30,10 @@ import {
   extractFormFactor,
   extractCpuFamily,
   applyDeterministicGuard,
+  applyPerBrandCap,
   buildTokenGroups,
   detectClassHint,
+  getActivePromptMode,
   type LlmCandidate,
 } from "../lib/market-price-llm";
 
@@ -356,6 +358,8 @@ async function runPipeline(opts: {
   // Daily cap + LLM call
   await incrementAndCheckCap();
 
+  const mode = getActivePromptMode();
+
   const llmCandidates: LlmCandidate[] = candidates.map((c, i) => ({
     index: i,
     description: c.description,
@@ -368,6 +372,7 @@ async function runPipeline(opts: {
     llmCandidates,
     120,
     classHint,
+    mode,
   );
 
   // Map indices back to real products
@@ -389,8 +394,14 @@ async function runPipeline(opts: {
     });
 
   // Deterministic guard: demote "close" → "partial" when CPU tier or form
-  // factor is extractable from both descriptions and they differ.
-  const matches = applyDeterministicGuard(opts.sourceDescription, rawMatches);
+  // factor differ. In "simple" mode, skip the product-family tier check so
+  // the model's unaided tier judgment is visible.
+  const guarded = applyDeterministicGuard(opts.sourceDescription, rawMatches, {
+    skipTierGuard: mode === "simple",
+  });
+
+  // Per-brand cap: keep at most 4 matches per brand in the final results.
+  const matches = applyPerBrandCap(guarded, 4);
 
   const result: MarketPriceResponse = {
     source: {

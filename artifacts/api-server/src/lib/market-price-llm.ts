@@ -330,33 +330,39 @@ function tierLabel(t: ProductTier): string {
   }[t];
 }
 
+export interface DeterministicGuardOptions {
+  /**
+   * When true, skip the product-family tier check (FAMILY_TIER_MAP).
+   * CPU-tier and form-factor demotions remain active.
+   * Use in "simple" prompt mode so the model's unaided tier judgment is visible.
+   */
+  skipTierGuard?: boolean;
+}
+
 /**
  * Post-processing guard: demote "close" → "partial" when CPU tier, form
- * factor, OR product-family tier can be extracted from BOTH source and
- * candidate descriptions and they differ.
+ * factor, OR (unless skipTierGuard) product-family tier can be extracted from
+ * BOTH source and candidate descriptions and they differ.
  *
  * Never upgrades; never touches "partial" or "related".
  * Token / tier not extractable from either side → no demotion (safe fallback).
- *
- * Product-tier demotion covers the two cases the prompt most often gets wrong:
- *   • FLAGSHIP candidate (X1 Carbon, EliteBook Ultra …) vs MAINSTREAM source
- *     → reason includes "(premium alternative)"
- *   • VALUE/CONSUMER candidate vs MAINSTREAM source → reason states tier gap
  */
 export function applyDeterministicGuard<T extends GuardableMatch>(
   sourceDesc: string,
   matches: T[],
+  options: DeterministicGuardOptions = {},
 ): T[] {
+  const { skipTierGuard = false } = options;
   const sourceFf   = extractFormFactor(sourceDesc);
   const sourceCpu  = extractCpuFamily(sourceDesc);
-  const sourceTier = detectProductTier(sourceDesc);
+  const sourceTier = skipTierGuard ? null : detectProductTier(sourceDesc);
 
   return matches.map((m) => {
     if (m.similarity !== "close") return m; // only "close" can be demoted
 
     const candidateFf   = extractFormFactor(m.description);
     const candidateCpu  = extractCpuFamily(m.description);
-    const candidateTier = detectProductTier(m.description);
+    const candidateTier = skipTierGuard ? null : detectProductTier(m.description);
 
     const ffDiffers =
       sourceFf != null && candidateFf != null && sourceFf !== candidateFf;
@@ -383,6 +389,25 @@ export function applyDeterministicGuard<T extends GuardableMatch>(
       similarity: "partial" as const,
       reason: `${m.reason} [${tags.join(", ")}]`,
     };
+  });
+}
+
+// ── Per-brand result cap ───────────────────────────────────────────────────
+
+/**
+ * Keep at most `cap` matches per brand in the results list.
+ * Applied after sorting (close → partial → related), so the retained matches
+ * are always the highest-similarity ones for each brand.
+ */
+export function applyPerBrandCap<T extends { brand: string }>(
+  matches: T[],
+  cap: number,
+): T[] {
+  const counts = new Map<string, number>();
+  return matches.filter((m) => {
+    const n = (counts.get(m.brand) ?? 0) + 1;
+    counts.set(m.brand, n);
+    return n <= cap;
   });
 }
 
@@ -526,9 +551,26 @@ export function detectClassHint(specText: string): string | null {
   return null;
 }
 
+// ── Prompt mode ───────────────────────────────────────────────────────────
+
+export type PromptMode = "simple" | "strict";
+
+/**
+ * Read the active prompt mode from the MARKET_PRICE_PROMPT env var.
+ * Defaults to "simple" when unset or unrecognised.
+ */
+export function getActivePromptMode(): PromptMode {
+  const val = process.env.MARKET_PRICE_PROMPT?.toLowerCase().trim();
+  return val === "strict" ? "strict" : "simple";
+}
+
 // ── Prompts ───────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a product-matching analyst for an IT distributor. \
+/**
+ * STRICT prompt — full rulebook (tier tables, ordering rules, etc.).
+ * Preserved verbatim for A/B comparison and easy revert.
+ */
+export const SYSTEM_PROMPT_STRICT = `You are a product-matching analyst for an IT distributor. \
 Given a source product and a numbered candidate list, identify which candidates are \
 functional equivalents or close alternatives. Judge ONLY from the provided descriptions \
 — never invent products not in the list. \
@@ -555,6 +597,40 @@ For brands or product lines not listed above, infer the tier from description an
 Ordering rule: output matches close first, then partial, then related. If more candidates qualify than the 12-match cap, drop the weakest partial/related matches first — never drop a close match to make room.
 Return at most 12 matches. Each reason must be 15 words or fewer. Respond with raw JSON only — no preamble, no commentary, no markdown fences.`;
 
+/**
+ * SIMPLE prompt — intent + latitude, minimal rulebook.
+ * Hypothesis: fewer prescriptive rules → more varied, accurate brand spread.
+ */
+export const SYSTEM_PROMPT_SIMPLE = `You are a product analyst for an IT distributor. \
+You will be given a source product and a numbered list of candidate products from other brands, \
+each with brand, part number, and description.
+
+Identify which candidates are genuine market alternatives a product manager should consider \
+when deciding what to stock. Use your knowledge of specifications, product-line positioning \
+(e.g. flagship vs mainstream vs value commercial vs consumer lines), and price positioning. \
+Where several brands have genuinely comparable options, include a spread of brands rather than \
+many variants from one.
+
+For each match give a similarity of "close", "partial", or "related", and a one-sentence reason \
+specific to that candidate — name its actual product line and say what makes it comparable or \
+different. Do not reuse the same reason across candidates.
+
+Similarity values: \
+"close" = near-identical function, spec class, and product-line tier; \
+"partial" = same function but different tier, capacity, or spec class; \
+"related" = same broad category but meaningfully different use case or form factor.
+
+Select ONLY from the numbered candidates — never invent products. \
+If nothing is genuinely comparable, return an empty list. \
+Return JSON only: {"matches":[{"index":<int>,"similarity":"close|partial|related","reason":"<one sentence>"}]}, best first, at most 12. \
+No preamble, no commentary, no markdown fences.`;
+
+/** Return the system prompt for the given (or current env-configured) mode. */
+export function getSystemPrompt(mode?: PromptMode): string {
+  const m = mode ?? getActivePromptMode();
+  return m === "strict" ? SYSTEM_PROMPT_STRICT : SYSTEM_PROMPT_SIMPLE;
+}
+
 // ── Main judge call ───────────────────────────────────────────────────────
 
 /**
@@ -568,6 +644,7 @@ Return at most 12 matches. Each reason must be 15 words or fewer. Respond with r
  * @param classHint          Optional component context appended to user message.
  *                           Use detectClassHint() to derive. When set, the judge
  *                           is warned that systems containing the component are not matches.
+ * @param mode               Prompt mode override — defaults to env var MARKET_PRICE_PROMPT.
  * @returns Parsed LlmJudgeResult with only valid indices retained
  */
 export async function callLlmJudge(
@@ -575,6 +652,7 @@ export async function callLlmJudge(
   candidates: LlmCandidate[],
   maxCandidates = 120,
   classHint?: string | null,
+  mode?: PromptMode,
 ): Promise<LlmJudgeResult> {
   const client = getClient();
   const cands = candidates.slice(0, maxCandidates);
@@ -601,7 +679,7 @@ export async function callLlmJudge(
         max_tokens: 8000,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: getSystemPrompt(mode) },
           { role: "user",   content: userMessage },
         ],
       },
