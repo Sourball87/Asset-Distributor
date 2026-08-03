@@ -276,78 +276,80 @@ interface SingleSkuViewProps {
 
 function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
   const baseline = distributors.find((d) => d.isBaseline);
+  const n = distributors.length;
 
   return (
-    <div className="border rounded-sm overflow-hidden text-sm">
-      {/* Product header */}
-      <div className="bg-muted/40 px-4 py-2.5 border-b flex items-start gap-6">
-        <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">VPN</span>
-          <span className="font-mono text-xs font-medium">{row.vpnDisplay}</span>
-        </div>
-        <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">Brand</span>
-          <span className="text-xs">{row.brand}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">Description</span>
-          <span className="text-xs text-muted-foreground">{row.description}</span>
-        </div>
-      </div>
-
-      {/* Distributor rows */}
-      <table className="w-full text-xs">
+    <div className="border rounded-sm overflow-hidden">
+      <table className="w-full text-xs border-collapse">
         <thead>
-          <tr className="border-b bg-card">
-            <th className="text-left px-4 py-2 font-semibold text-muted-foreground w-40">Distributor</th>
-            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-28">Price (ex)</th>
-            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-20">SOH</th>
-            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-24">Δ$</th>
-            <th className="text-right px-4 py-2 font-semibold text-muted-foreground w-20">Δ%</th>
+          <tr className="bg-card border-b">
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-32">VPN</th>
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Brand</th>
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px]">Description</th>
+            <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-28">Distributor</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-24">Price (ex)</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">SOH</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-20">Δ$</th>
+            <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground text-[11px] w-16">Δ%</th>
           </tr>
         </thead>
         <tbody>
           {distributors.map((d, i) => {
-            const isCurrent  = getIsCurrent(row, d.id);
-            const price      = row[`d${d.id}_price`]    as number | null;
-            const soh        = row[`d${d.id}_soh`]      as number | null;
-            const delta      = row[`d${d.id}_delta`]    as number | null;
-            const deltaPct   = row[`d${d.id}_deltaPct`] as number | null;
-            const snapDate   = getSnapshotDate(row, d.id);
-            const staleLabel = !isCurrent ? (snapDate ? `Last seen ${fmtDateDDMMYYYY(snapDate)}` : "No data") : null;
-
-            const cheapest = !d.isBaseline && row[`d${d.id}_cheapest`] as boolean;
+            const isCurrent = getIsCurrent(row, d.id);
+            const price     = row[`d${d.id}_price`]    as number | null;
+            const soh       = row[`d${d.id}_soh`]      as number | null;
+            const delta     = row[`d${d.id}_delta`]    as number | null;
+            const deltaPct  = row[`d${d.id}_deltaPct`] as number | null;
+            const snapDate  = getSnapshotDate(row, d.id);
+            const staleHint = !isCurrent ? (snapDate ? `Last seen ${fmtDateDDMMYYYY(snapDate)}` : "No data") : null;
+            const cheapest  = !d.isBaseline && !!(row[`d${d.id}_cheapest`] as boolean);
+            const rowBg     = cheapest ? "bg-green-50" : row.dickerIsMostExpensive && d.isBaseline ? "bg-red-50" : i % 2 !== 0 ? "bg-muted/20" : "";
 
             return (
-              <tr key={d.id} className={`border-b last:border-0 ${i % 2 === 0 ? "" : "bg-muted/20"} ${cheapest ? "bg-green-50" : ""} ${row.dickerIsMostExpensive && d.isBaseline ? "bg-red-50" : ""}`}>
+              <tr key={d.id} className={`border-b last:border-0 ${rowBg}`}>
+                {/* VPN + Brand + Description span all distributor rows via rowSpan */}
+                {i === 0 && (
+                  <>
+                    <td rowSpan={n} className="px-3 py-1.5 align-top font-mono text-[11px] font-medium border-r border-border/50 whitespace-nowrap">
+                      {row.vpnDisplay}
+                    </td>
+                    <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] border-r border-border/50 whitespace-nowrap">
+                      {row.brand}
+                    </td>
+                    <td rowSpan={n} className="px-3 py-1.5 align-top text-[11px] text-muted-foreground border-r border-border/50">
+                      {row.description}
+                    </td>
+                  </>
+                )}
+
                 {/* Distributor name */}
-                <td className="px-4 py-2.5 font-medium">
-                  <span className={isCurrent ? "" : "text-muted-foreground/60"}>
+                <td className="px-3 py-1.5 text-[11px] font-medium border-r border-border/50">
+                  <span className={isCurrent ? "" : "text-muted-foreground/50"}>
                     {d.name}{d.isBaseline ? " ★" : ""}
-                    {baseline && d.id === baseline.id && row.dickerIsMostExpensive && (
-                      <span className="ml-1.5 text-[10px] text-red-500 font-semibold">most expensive</span>
-                    )}
-                    {cheapest && (
-                      <span className="ml-1.5 text-[10px] text-green-600 font-semibold">cheapest</span>
-                    )}
                   </span>
-                  {staleLabel && (
-                    <span className="block text-[10px] text-muted-foreground/60 font-normal">{staleLabel}</span>
+                  {baseline && d.id === baseline.id && row.dickerIsMostExpensive && (
+                    <span className="ml-1 text-[10px] text-red-500 font-semibold">▲</span>
+                  )}
+                  {cheapest && (
+                    <span className="ml-1 text-[10px] text-green-600 font-semibold">✓</span>
+                  )}
+                  {staleHint && (
+                    <span className="block text-[10px] text-muted-foreground/50 font-normal">{staleHint}</span>
                   )}
                 </td>
 
                 {/* Price */}
-                <td className={`px-4 py-2.5 text-right font-mono ${isCurrent ? "" : "text-muted-foreground/40"}`}>
+                <td className={`px-3 py-1.5 text-right font-mono text-[11px] ${isCurrent ? "" : "text-muted-foreground/40"}`}>
                   {isCurrent ? fmtPrice(price) : "—"}
                 </td>
 
                 {/* SOH */}
-                <td className={`px-4 py-2.5 text-right font-mono ${isCurrent ? "" : "text-muted-foreground/40"}`}>
+                <td className={`px-3 py-1.5 text-right font-mono text-[11px] ${isCurrent ? "" : "text-muted-foreground/40"}`}>
                   {isCurrent ? fmtSoh(soh) : "—"}
                 </td>
 
                 {/* Δ$ */}
-                <td className="px-4 py-2.5 text-right font-mono">
+                <td className="px-3 py-1.5 text-right font-mono text-[11px]">
                   {d.isBaseline || !isCurrent ? (
                     <span className="text-muted-foreground/40">—</span>
                   ) : (
@@ -358,7 +360,7 @@ function SingleSkuView({ row, distributors }: SingleSkuViewProps) {
                 </td>
 
                 {/* Δ% */}
-                <td className="px-4 py-2.5 text-right font-mono">
+                <td className="px-3 py-1.5 text-right font-mono text-[11px]">
                   {d.isBaseline || !isCurrent ? (
                     <span className="text-muted-foreground/40">—</span>
                   ) : (
