@@ -695,8 +695,39 @@ describe("detectProductTier", () => {
   it("detects ThinkPad T14S as mainstream", () => {
     expect(detectProductTier("LENOVO THINKPAD T14S GEN6 U7-268V 32GB 1TB W11P")).toBe("mainstream");
   });
-  it("detects ThinkPad X13 as mainstream (not flagship)", () => {
+  it("detects ThinkPad X13 as mainstream (not flagship) — branded form", () => {
     expect(detectProductTier("LENOVO THINKPAD X13 GEN5 U5-125U 16GB 512GB W11P")).toBe("mainstream");
+  });
+  it("detects Lenovo X13 G6 as mainstream — bare form (THINKPAD omitted by distributor)", () => {
+    // Confirmed 20+ rows of "LENOVO X13 G6/G7…" in catalogue — old pattern /thinkpad\s+x13\b/ missed all of them.
+    // Fixed by adding /\blenovo\s+x13\b/i.
+    expect(detectProductTier("LENOVO X13 G6 U5-225U, 13.3\" WUXGA, 512GB, 16GB, W11P(AI), 3YR PREM")).toBe("mainstream");
+  });
+  it("detects Lenovo X13 G7 AMD as mainstream — bare form", () => {
+    expect(detectProductTier("LENOVO X13 G7 R5-440, 13.3\" WUXGA, 512GB, 16GB, W11P, 3YR PREM")).toBe("mainstream");
+  });
+  it("detects Lenovo X13 Detach G1 as mainstream — bare 2-in-1 form", () => {
+    // Detachable commercial tablet — vPro, U5-332/U7-365; mainstream tier is correct.
+    expect(detectProductTier("LENOVO X13 DETACH G1 U5-335 VPRO, 13.2\" 2.8K TOUCH, 512GB, 32GB, W11P, 3YR PREM")).toBe("mainstream");
+  });
+  it("detects ASUS ExpertBook 14 WUXGA (B3-series) as mainstream — real stored form", () => {
+    // Old pattern /expertbook\s+b5/ never matched — B-numbers are in VPN, not descriptions.
+    // Fixed to /\basus\s+expertbook\b/i covering all ExpertBook sizes/generations.
+    expect(detectProductTier("ASUS ExpertBook 14 14' WUXGA Notebook Intel Core Ultra 5 225H DDR5 16GB 512GB SSD Win 11 Pro 1Y Warranty OSW + Battery")).toBe("mainstream");
+  });
+  it("detects ASUS ExpertBook 14 FHD (B1-series) as mainstream — real stored form", () => {
+    // B1 tier is value in absolute terms but B-numbers aren't in descriptions; all ExpertBook maps to mainstream.
+    expect(detectProductTier("ASUS ExpertBook 14 14' FHD Notebook AMD Ryzen 5 150 DDR5 16GB 512GB SSD Win 11 Pro 1Y OnSite Warranty + Battery")).toBe("mainstream");
+  });
+  it("detects ASUS ExpertBook 15 as mainstream — real stored form", () => {
+    expect(detectProductTier("ASUS ExpertBook 15 15.6' FHD Notebook Intel Core 5 120U DDR5 16GB 512GB Win 11 Pro 1Y Warranty OSW + Battery")).toBe("mainstream");
+  });
+  it("does NOT misfire ExpertBook pattern on standalone Swift — Swift requires Acer prefix", () => {
+    // /\bacer\s+swift\b/i — requires ACER before SWIFT; ROG Swift monitors must not match.
+    expect(detectProductTier("ROG SWIFT OLED PG27AQDP FHD 480HZ 3Y")).toBeNull();
+  });
+  it("detects Acer Swift as consumer — Acer-anchored pattern", () => {
+    expect(detectProductTier("ACER SWIFT 14 AI SF14-58 14\" WUXGA SNAPDRAGON X ELITE 32GB 1TB W11P")).toBe("consumer");
   });
   it("detects HP EliteBook 640 G11 as mainstream — real stored form", () => {
     // Old pattern /elitebook\s+6\b/i failed on "640" (\b not satisfied between 6 and 4).

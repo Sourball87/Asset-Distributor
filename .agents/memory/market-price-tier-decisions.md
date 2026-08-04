@@ -47,9 +47,27 @@ After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Ess
 - HP 3.6% matched (138/3814) — misleadingly low: HP care packs include the word "NOTEBOOK" so they pass the HW filter; actual commercial notebook lines (EliteBook, ProBook, ZBook) ARE covered by patterns. Residual are service/FRU items that can't be candidates in the pipeline.
 - DELL 59.6% matched (189/317 client HW rows) — up from 24.6%. Remaining 40% unmatched are server SSDs/CPUs/memory/GPUs that pass the GB-token HW filter but can never be candidates in a client-hardware comparison. All actual Dell Pro commercial notebooks and desktops are now matched.
 
-## HP EliteBook 6xx/8xx pattern fix
+## FAMILY_TIER_MAP pattern audit findings (run against 20K real descriptions)
 
-Old patterns `/elitebook\s+6\b/i` and `/elitebook\s+8\b/i` only matched bare "6" / "8" at word boundary — BUT real stored descriptions are "ELITEBOOK 640 G11", "ELITEBOOK 860 G11" (three-digit model numbers), where the digit is NOT at a word boundary. Fixed to `/elitebook\s+6\d{2}\b/i` and `/elitebook\s+8\d{2}\b/i`. This also affects Pro 7 tier-guard: EliteBook 6xx/8xx are now correctly mainstream peers.
+**Rule: never test patterns against idealised strings — always use real stored descriptions.**
+
+| Pattern | Bug | Fix |
+|---|---|---|
+| `/elitebook\s+6\b/i` | `\b` not satisfied in "ELITEBOOK 640" (6 followed by 4) | → `/elitebook\s+6\d{2}\b/i` |
+| `/elitebook\s+8\b/i` | `\b` not satisfied in "ELITEBOOK 860" (8 followed by 6) | → `/elitebook\s+8\d{2}\b/i` |
+| `/expertbook\s+b5/i` (mainstream) | B-numbers in VPN prefix, NOT in description text; never matches | → `/\basus\s+expertbook\b/i` mainstream |
+| `/expertbook\s+b1/i` (value) | Same — never matches | Removed; all ExpertBook → mainstream |
+| `/thinkpad\s+x13\b/i` | Misses 20+ bare-form "LENOVO X13 G6/G7" rows | Added `/\blenovo\s+x13\b/i` alongside |
+| `/\bswift\b/i` | Hits ROG Swift gaming monitors | → `/\bacer\s+swift\b/i` |
+
+**Genuinely not-stocked (zero-hit but syntactically correct — keep for when products appear):**
+Dragonfly, TravelMate P2/P4/P6/B, ExpertBook B5/B1 label, Latitude 3xxx, Pro Base, Inspiron, Aspire, Nitro.
+
+**Sampling artifacts (zero-hit in 20K LIMIT, confirmed present in full DB):**
+ThinkPad E branded form — ThinkPad E14 G7 IS in DB; just excluded by 20K DISTINCT cutoff.
+
+**Harmless misfires (never reach candidate pool):**
+`/pro\w*\s+premium/i` hits Azure Information Protection licenses; `/\byoga\b/i` hits X1 Yoga (caught by flagship block first); `/pavilion/i` hits warranty descriptions; `/\benvy\b/i` hits HP Envy printers.
 - MICROSOFT 90.6% (347/383) — Surface Laptop/Pro well covered; 36 unmatched are FRU repair parts.
 - ASUS 1.2% — only NUC mini PCs and gaming motherboards; no commercial ExpertBook laptops in catalogue.
 

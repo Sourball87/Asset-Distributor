@@ -274,7 +274,8 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
     patterns: [
       /thinkpad\s+t\d/i,               // T14, T14S, T15, T16, T13 … (THINKPAD-prefixed form)
       /\blenovo\s+t1[3-9]s?\b/i,       // "LENOVO T14 G7…", "LENOVO T14S G6…", "LENOVO T16 G4…" — distributor omits THINKPAD
-      /thinkpad\s+x13\b/i,             // X13 (not X1, not X9)
+      /thinkpad\s+x13\b/i,             // X13 branded form ("LENOVO THINKPAD X13 GEN5…")
+      /\blenovo\s+x13\b/i,             // X13 bare form ("LENOVO X13 G6/G7…") — distributor omits THINKPAD prefix (20+ rows confirmed)
       /elitebook\s+6\d{2}\b/i,          // HP EliteBook 6xx series (640, 650, 660, 680…) — real form: "ELITEBOOK 640 G11"
       /elitebook\s+8\d{2}\b/i,          // HP EliteBook 8xx series (840, 850, 860…) — real form: "ELITEBOOK 860 G11"
       /\bpro\s*(?:plus|1[3-9]\s*plus)\b/i, // Dell Pro Plus / Pro13 Plus / Pro14 Plus / Pro16 Plus (legacy label = mainstream)
@@ -282,7 +283,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /\bdell\s+pro\s*7\b/i,           // Dell Pro 7 (2026 upper-mainstream — revival of Latitude 7000; same tier as T14s/X13/EliteBook 8)
       /\bdell\s+pro\s+desktop\b/i,     // Dell Pro Desktop MFF/SFF (standard, no tier suffix)
       /latitude\s+[57]\d{3}/i,         // Dell Latitude 5xxx / 7xxx (legacy)
-      /expertbook\s+b5/i,
+      /\basus\s+expertbook\b/i,       // ASUS ExpertBook (any size/tier) — B-numbers appear in VPN, not description; map all to mainstream as the middle ground (B9/P5 flagship will be slightly under-tiered but LLM handles spec delta)
       /travelmate\s+p[46]/i,
       /surface\s+laptop/i,
       /surface\s+pro\b/i,
@@ -298,7 +299,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /\blenovo\s+l1[4-9]\b/i,         // "LENOVO L14 G6…", "LENOVO L16 G2…" — distributor omits THINKPAD
       /thinkbook/i,                    // Lenovo ThinkBook (not ThinkPad)
       /probook/i,                      // HP ProBook
-      /expertbook\s+b1/i,
+      // expertbook b1 removed — B-numbers not in description text; ExpertBook covered by mainstream pattern above
       /travelmate\s+p2/i,
       /travelmate\s+b\d/i,
       /\bpro\s*base\b/i,                       // Dell Pro Base (legacy label)
@@ -322,7 +323,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /vivobook/i,
       /zenbook/i,
       /\baspire\b/i,
-      /\bswift\b/i,
+      /\bacer\s+swift\b/i,             // Acer Swift laptops — anchored to "ACER" to avoid misfiring on ROG Swift gaming monitors
       /\bnitro\b/i,
     ],
   },
