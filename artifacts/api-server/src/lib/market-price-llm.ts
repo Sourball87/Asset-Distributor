@@ -242,8 +242,11 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
   {
     tier: "flagship",
     patterns: [
-      /thinkpad\s+x1\b/i,       // X1 Carbon, X1 Yoga, X1 Extreme, X1 Nano
-      /thinkpad\s+x9\b/i,       // X9 series
+      /thinkpad\s+x1\b/i,       // X1 Carbon/Yoga/Extreme/Nano (THINKPAD-prefixed form)
+      /\bx1\s+carbon\b/i,       // "LENOVO X1 CARBON G13 AURA…" — distributor omits THINKPAD
+      /\bx1\s+yoga\b/i,         // "LENOVO X1 YOGA G…" — same distributor format
+      /thinkpad\s+x9\b/i,       // X9 series (THINKPAD-prefixed form)
+      /\bx9\s+aura\b/i,         // "LENOVO X9 AURA GEN1…" — distributor omits THINKPAD
       /elitebook\s+ultra/i,     // HP EliteBook Ultra
       /elitebook\s+x\b/i,       // HP EliteBook X (flagship tier)
       /dragonfly/i,             // HP EliteBook Dragonfly

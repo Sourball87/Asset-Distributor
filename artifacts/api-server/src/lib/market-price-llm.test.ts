@@ -517,10 +517,42 @@ describe("detectClassHint", () => {
 
 describe("detectProductTier", () => {
   // FLAGSHIP
-  it("detects ThinkPad X1 Carbon as flagship", () => {
+  // ── Real stored descriptions (from live DB — use these, not idealised ones) ─
+  it("detects X1 Carbon G13 Aura as flagship — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO X1 CARBON G13 AURA U7-268V VPRO, 14\" WUXGA TOUCH, 512GB, 32GB, AI, W11P(CP+),3YPREM"
+    expect(detectProductTier('LENOVO X1 CARBON G13 AURA U7-268V VPRO, 14" WUXGA TOUCH, 512GB, 32GB, AI, W11P(CP+),3YPREM')).toBe("flagship");
+  });
+  it("detects EliteBook Ultra G1I as flagship — real DB description", () => {
+    // Stored as: "ELITEBOOK ULTRA G1I 14 AI U5-226V16GB 512GB W11P STD TS WL BT L-LIFE BATT 3YR DIB"
+    expect(detectProductTier("ELITEBOOK ULTRA G1I 14 AI U5-226V16GB 512GB W11P STD TS WL BT L-LIFE BATT 3YR DIB")).toBe("flagship");
+  });
+  it("detects EliteBook X Flip G1I as flagship — real DB description", () => {
+    // Stored as: "ELITEBOOK X FLIP G1I 14 AI U5-226V 16GB 512GB W11P STD TS PVCY WL BT L-LIFE BATT PEN 3YR 5"
+    expect(detectProductTier("ELITEBOOK X FLIP G1I 14 AI U5-226V 16GB 512GB W11P STD TS PVCY WL BT L-LIFE BATT PEN 3YR 5")).toBe("flagship");
+  });
+  it("detects HP ProBook 4 G1i as value — real DB description", () => {
+    // Stored as: "HP ProBook 4 G1i BP9F2PT, U5-225U, 16GB, 512GB, 14\" WUXGA IR TOUCH, W11P, 1Y OS"
+    expect(detectProductTier('HP ProBook 4 G1i BP9F2PT, U5-225U, 16GB, 512GB, 14" WUXGA IR TOUCH, W11P, 1Y OS')).toBe("value");
+  });
+  it("detects HP ProBook 440 G11 as value — real DB description", () => {
+    // Stored as: "HP ProBook 440 G11 14' WUXGA Intel U5-125U 16GB DDR5 512GB SSD Windows 11 PRO…"
+    expect(detectProductTier("HP ProBook 440 G11 14' WUXGA Intel U5-125U 16GB DDR5 512GB SSD Windows 11 PRO")).toBe("value");
+  });
+  it("detects ThinkBook 14 2-in-1 as value — real DB description with BOX DAMAGE prefix", () => {
+    // Stored as: "BOX DAMAGE Lenovo ThinkBook 14 2-in-1 G5 U5-225U, 16GB, 512GB, 14\" WUXGA TOUCH, W11P, 1Y OS"
+    expect(detectProductTier('BOX DAMAGE Lenovo ThinkBook 14 2-in-1 G5 U5-225U, 16GB, 512GB, 14" WUXGA TOUCH, W11P, 1Y OS')).toBe("value");
+  });
+  // ── Idealised descriptions (kept for regression coverage) ─────────────────
+  it("detects ThinkPad X1 Carbon as flagship — THINKPAD-prefixed form", () => {
     expect(detectProductTier("LENOVO THINKPAD X1 CARBON GEN12 U7-258V 32GB 1TB")).toBe("flagship");
   });
-  it("detects ThinkPad X9 as flagship", () => {
+  it("detects X1 Yoga as flagship — bare form without THINKPAD prefix", () => {
+    expect(detectProductTier("LENOVO X1 YOGA G9 U7-155U 32GB 1TB TOUCH W11P")).toBe("flagship");
+  });
+  it("detects X9 Aura as flagship — bare form without THINKPAD prefix", () => {
+    expect(detectProductTier("LENOVO X9 AURA GEN1 U7-258V 32GB 1TB W11P AI")).toBe("flagship");
+  });
+  it("detects ThinkPad X9 as flagship — THINKPAD-prefixed form", () => {
     expect(detectProductTier("LENOVO THINKPAD X9 AURA GEN1 U7")).toBe("flagship");
   });
   it("detects EliteBook Ultra as flagship", () => {
