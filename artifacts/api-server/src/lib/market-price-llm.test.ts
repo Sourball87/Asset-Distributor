@@ -9,6 +9,8 @@ import {
   DAILY_LLM_CAP,
   extractFormFactor,
   extractCpuFamily,
+  resolveFormFactorGroup,
+  detectChassisClass,
   applyDeterministicGuard,
   buildTokenGroups,
   detectClassHint,
@@ -1069,5 +1071,240 @@ describe("applyDeterministicGuard — end-to-end with real DB descriptions", () 
     expect(results[0]!.similarity).toBe("partial"); // X1 Carbon demoted
     expect(results[1]!.similarity).toBe("close");   // T14 unchanged
     expect(results[2]!.similarity).toBe("partial"); // L14 demoted
+  });
+});
+
+// ── resolveFormFactorGroup ────────────────────────────────────────────────
+// Uses real stored description strings from the DB survey (2025-08).
+
+describe("resolveFormFactorGroup", () => {
+  // small-desktop group ────────────────────────────────────────────────────
+  it("maps Dell MICRO (MFF) description to small-desktop", () => {
+    // Real: CTOC715_QCM1250_AU
+    expect(resolveFormFactorGroup("DELL PRO DESKTOP, MICRO (MFF), I7-14700T, 16GB, 512GB, W11P, WL, 3YOS")).toBe("small-desktop");
+  });
+  it("maps HP Elite Mini description to small-desktop (MINI token)", () => {
+    // Real catalogue form: HP Elite Mini 800 G9
+    expect(resolveFormFactorGroup("HP ELITE MINI 800 G9 I7-13700T 16GB 512GB W11P 3YR")).toBe("small-desktop");
+  });
+  it("maps Lenovo ThinkCentre Tiny description to small-desktop (TINY token)", () => {
+    // Real: LENOVO ThinkCentre M75Q G5 Tiny AMD Ryzen 5
+    expect(resolveFormFactorGroup("LENOVO ThinkCentre M75Q G5 Tiny AMD Ryzen 5 8500GE 16GB DDR5 512GB W11P")).toBe("small-desktop");
+  });
+  it("maps ASUS NUC description to small-desktop (NUC token)", () => {
+    // Real: ASUS NUC 14 PRO SLIM MINI PC KIT, U5-125H...
+    // MINI is found before SLIM so resolves to small-desktop, not sff
+    expect(resolveFormFactorGroup("ASUS NUC 14 PRO SLIM MINI PC KIT, U5-125H, DDR5(0/2), M.2(0/2), WL")).toBe("small-desktop");
+  });
+  it("maps standalone MFF token to small-desktop", () => {
+    expect(resolveFormFactorGroup("HP PRO 400 MFF I5-14500T 16GB 512GB W11P")).toBe("small-desktop");
+  });
+
+  // sff group ──────────────────────────────────────────────────────────────
+  it("maps Dell SLIM (SFF) description to sff", () => {
+    // Real: BST515_QCS1250_AU
+    expect(resolveFormFactorGroup("DELL PRO DESKTOP, SLIM (SFF), I5-14500, 16GB, 512GB, W11P, 1YOS")).toBe("sff");
+  });
+  it("maps Lenovo SFF description to sff", () => {
+    expect(resolveFormFactorGroup("LENOVO NEO 50S G5 SFF I7-13700, 512GB, 16GB, W11P, 3YOS")).toBe("sff");
+  });
+  it("maps HP SFF description to sff", () => {
+    expect(resolveFormFactorGroup("HP PRODESK 400 G9 SFF I5-14500 16GB 512GB W11P 3YR")).toBe("sff");
+  });
+
+  // tower group ─────────────────────────────────────────────────────────────
+  it("maps TOWER token to tower", () => {
+    expect(resolveFormFactorGroup("HP PRODESK 400 G9 TOWER I7-13700 16GB 512GB W11P 3YR")).toBe("tower");
+  });
+  it("maps TWR abbreviation to tower", () => {
+    expect(resolveFormFactorGroup("LENOVO THINKCENTRE M90T G4 I7-14700 TWR 16GB 512GB W11P")).toBe("tower");
+  });
+
+  // aio group ───────────────────────────────────────────────────────────────
+  it("maps AIO token to aio", () => {
+    expect(resolveFormFactorGroup("DELL AIO 3420 I5-1235U 8GB 512GB 23.8IN FHD W11P 1YR")).toBe("aio");
+  });
+  it("maps ALL-IN-ONE to aio", () => {
+    expect(resolveFormFactorGroup("HP PROONE 440 G9 ALL-IN-ONE I5-13500T 8GB 512GB W11P 3YR")).toBe("aio");
+  });
+  it("maps ALL IN ONE (with spaces) to aio", () => {
+    expect(resolveFormFactorGroup("LENOVO IDEACENTRE AIO ALL IN ONE I5-12450H 8GB 512GB W11P")).toBe("aio");
+  });
+
+  // null / undetermined ─────────────────────────────────────────────────────
+  it("returns null for a laptop description with no desktop ff token", () => {
+    expect(resolveFormFactorGroup("DELL PRO 5 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, W11P")).toBeNull();
+  });
+  it("returns null for a monitor", () => {
+    expect(resolveFormFactorGroup("DELL U2722D 27IN ULTRASHARP USB-C 4K IPS MONITOR")).toBeNull();
+  });
+
+  // Synonym correctness — key cross-brand pairs that triggered the original bug
+  it("MFF and MINI both map to the same group (cross-brand mini-desktop)", () => {
+    const dellMicro = resolveFormFactorGroup("DELL PRO DESKTOP, MICRO (MFF), I7-14700T, 16GB, 512GB, W11P");
+    const hpMini    = resolveFormFactorGroup("HP ELITE MINI 800 G9 I7-13700T 16GB 512GB W11P");
+    const lenovoTiny = resolveFormFactorGroup("LENOVO ThinkCentre M75Q G5 Tiny AMD Ryzen 5 8500GE 16GB DDR5");
+    const asusNuc   = resolveFormFactorGroup("ASUS NUC 14 PRO SLIM MINI PC KIT, U5-125H, DDR5(0/2), M.2(0/2)");
+    expect(dellMicro).toBe("small-desktop");
+    expect(hpMini).toBe("small-desktop");
+    expect(lenovoTiny).toBe("small-desktop");
+    expect(asusNuc).toBe("small-desktop");
+    // All four in same group → the guard will NOT demote cross-brand mini-desktop matches
+  });
+  it("MFF and SFF are DIFFERENT groups (form-factor demotion should still fire)", () => {
+    const mff = resolveFormFactorGroup("DELL PRO DESKTOP, MICRO (MFF), I7-14700T, 16GB, 512GB");
+    const sff = resolveFormFactorGroup("LENOVO NEO 50S G5 SFF I7-13700, 512GB, 16GB, W11P");
+    expect(mff).toBe("small-desktop");
+    expect(sff).toBe("sff");
+    expect(mff).not.toBe(sff);
+  });
+  it("SFF and SLIM both map to sff group (no demotion between them)", () => {
+    const sfff  = resolveFormFactorGroup("LENOVO NEO 50S G5 SFF I7-13700 16GB 512GB W11P");
+    const slim  = resolveFormFactorGroup("DELL PRO DESKTOP, SLIM (SFF), I5-14500, 16GB, 512GB, W11P");
+    expect(sfff).toBe("sff");
+    expect(slim).toBe("sff");
+  });
+});
+
+// ── detectChassisClass ───────────────────────────────────────────────────
+// Classifies a description into laptop / desktop / aio / tablet / null.
+
+describe("detectChassisClass", () => {
+  it("classifies a NUC description as desktop", () => {
+    expect(detectChassisClass("ASUS NUC 14 PRO SLIM MINI PC KIT, U5-125H, DDR5(0/2), M.2(0/2), WL, NO P/CORD")).toBe("desktop");
+  });
+  it("classifies an SFF description as desktop", () => {
+    expect(detectChassisClass("LENOVO NEO 50S G5 SFF I7-13700, 512GB, 16GB, W11P, 3YOS")).toBe("desktop");
+  });
+  it("classifies a MICRO (MFF) description as desktop", () => {
+    expect(detectChassisClass("DELL PRO DESKTOP, MICRO (MFF), I7-14700T, 16GB, 512GB, W11P")).toBe("desktop");
+  });
+  it("classifies a TOWER description as desktop", () => {
+    expect(detectChassisClass("HP PRODESK 400 G9 TOWER I7-13700 16GB 512GB W11P 3YR")).toBe("desktop");
+  });
+  it("classifies a THINKCENTRE description as desktop (by brand product-line keyword)", () => {
+    expect(detectChassisClass("LENOVO ThinkCentre M75Q G5 Tiny AMD Ryzen 5 8500GE 16GB DDR5 512GB W11P")).toBe("desktop");
+  });
+  it("classifies an explicit DESKTOP keyword description as desktop", () => {
+    expect(detectChassisClass("DELL PRO DESKTOP, SLIM (SFF), I5-14500, 16GB, 512GB, W11P")).toBe("desktop");
+  });
+
+  it("classifies a NOTEBOOK description as laptop", () => {
+    expect(detectChassisClass("DELL PRO 5 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, W11P")).toBe("laptop");
+  });
+  it("classifies an ELITEBOOK description as laptop (product-line signal)", () => {
+    expect(detectChassisClass("HP ELITEBOOK 840 G11 14\" I7-1355U 16GB 512GB W11P 3YR")).toBe("laptop");
+  });
+  it("classifies a THINKPAD description as laptop (product-line signal)", () => {
+    expect(detectChassisClass("LENOVO THINKPAD T14 G5 I7-1355U 16GB 512GB W11P 3YR PREM")).toBe("laptop");
+  });
+  it("classifies a PROBOOK description as laptop", () => {
+    expect(detectChassisClass("HP PROBOOK 440 G11 14\" U5-125U 16GB 512GB W11P 1YR")).toBe("laptop");
+  });
+  it("classifies an EXPERTBOOK description as laptop (not EXPERTCENTRE desktop)", () => {
+    expect(detectChassisClass("ASUS EXPERTBOOK B9 OLED B9403CVAR I7-1355U 16GB 512GB W11P")).toBe("laptop");
+  });
+
+  it("classifies an AIO description as aio (not generic desktop)", () => {
+    expect(detectChassisClass("DELL AIO 3420 I5-1235U 8GB 512GB 23.8IN FHD W11P 1YR")).toBe("aio");
+  });
+  it("classifies ALL-IN-ONE as aio", () => {
+    expect(detectChassisClass("HP PROONE 440 G9 ALL-IN-ONE I5-13500T 8GB 512GB W11P 3YR")).toBe("aio");
+  });
+
+  it("returns null for a laptop with no identifiable form-factor token", () => {
+    // Generic description without NOTEBOOK/LAPTOP keyword or brand family name
+    expect(detectChassisClass("GENERIC PRODUCT 16GB 512GB SSD I7")).toBeNull();
+  });
+  it("returns null for a monitor", () => {
+    expect(detectChassisClass("DELL U2722D 27IN ULTRASHARP USB-C 4K IPS MONITOR")).toBeNull();
+  });
+});
+
+// ── applyDeterministicGuard — chassis-class hard-drop ─────────────────────
+// Laptop↔desktop mismatches must be DROPPED entirely (not demoted to partial).
+
+describe("applyDeterministicGuard — chassis-class drop", () => {
+  const m = (
+    description: string,
+    similarity: "close" | "partial" | "related",
+    reason = "matches well",
+  ) => ({ description, similarity, reason });
+
+  const NOTEBOOK_SOURCE = 'DELL PRO 5 NOTEBOOK, 14" FHD+IR, U5-335, 16GB, 512GB, W11P(CP+), 3YOS';
+  const SFF_SOURCE      = "LENOVO NEO 50S G5 SFF I7-13700, 512GB, 16GB, W11P, 3YOS";
+  const NUC_CANDIDATE   = "ASUS NUC 14 PRO SLIM MINI PC KIT, U5-125H, DDR5(0/2), M.2(0/2), WL, NO P/CORD, 3YR RTB";
+  const ELITEBOOK_CAND  = "HP ELITEBOOK 840 G11 14\" I7-1355U 16GB 512GB W11P 3YR";
+  const SFF_CANDIDATE   = "HP PRODESK 400 G9 SFF I5-14500 16GB 512GB W11P 3YR";
+
+  it("drops NUC candidate against notebook source (desktop vs laptop)", () => {
+    const result = applyDeterministicGuard(NOTEBOOK_SOURCE, [
+      m(NUC_CANDIDATE, "close"),
+    ]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("drops SFF candidate against notebook source (desktop vs laptop)", () => {
+    const result = applyDeterministicGuard(NOTEBOOK_SOURCE, [
+      m(SFF_CANDIDATE, "close"),
+    ]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("drops notebook candidate against SFF desktop source (laptop vs desktop)", () => {
+    const result = applyDeterministicGuard(SFF_SOURCE, [
+      m(ELITEBOOK_CAND, "close"),
+    ]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("keeps notebook candidate against notebook source (same class)", () => {
+    const result = applyDeterministicGuard(NOTEBOOK_SOURCE, [
+      m(ELITEBOOK_CAND, "close"),
+    ]);
+    expect(result).toHaveLength(1);
+    // May or may not be demoted on CPU/tier grounds, but must not be dropped
+  });
+
+  it("keeps SFF candidate against SFF source (same class)", () => {
+    const result = applyDeterministicGuard(SFF_SOURCE, [
+      m(SFF_CANDIDATE, "close"),
+    ]);
+    expect(result).toHaveLength(1);
+    // CPU families differ (I7 vs I5) → demoted, but not dropped
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toContain("CPU tier differs");
+  });
+
+  it("keeps NUC candidate against NUC source (both desktop → same class)", () => {
+    const nuc2 = "ASUS NUC 14 PERFORMANCE MINI PC, U9-185H, DDR5(0/2), M.2(0/3), RTX 4070";
+    const result = applyDeterministicGuard(NUC_CANDIDATE, [
+      m(nuc2, "close"),
+    ]);
+    expect(result).toHaveLength(1);
+  });
+
+  it("drops the desktop candidate but keeps the laptop candidate in a mixed batch", () => {
+    const result = applyDeterministicGuard(NOTEBOOK_SOURCE, [
+      m(NUC_CANDIDATE, "close"),     // desktop → should be dropped
+      m(ELITEBOOK_CAND, "close"),    // laptop → should be kept
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.description).toBe(ELITEBOOK_CAND);
+  });
+
+  it("does NOT drop when source chassis is undetermined (safe fallback)", () => {
+    const result = applyDeterministicGuard("GENERIC PRODUCT 16GB 512GB", [
+      m(NUC_CANDIDATE, "close"),
+    ]);
+    // Source chassis unknown → cannot drop → keep
+    expect(result).toHaveLength(1);
+  });
+
+  it("does NOT drop when candidate chassis is undetermined", () => {
+    const result = applyDeterministicGuard(NOTEBOOK_SOURCE, [
+      m("PRODUCT WITHOUT CHASSIS SIGNALS 16GB 512GB I5", "close"),
+    ]);
+    expect(result).toHaveLength(1);
   });
 });

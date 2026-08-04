@@ -29,6 +29,9 @@ import {
   LLM_MODEL,
   extractFormFactor,
   extractCpuFamily,
+  resolveFormFactorGroup,
+  formFactorGroupTokens,
+  detectChassisClass,
   applyDeterministicGuard,
   applyPerBrandCap,
   buildTokenGroups,
@@ -177,17 +180,38 @@ async function getCandidates(opts: {
   // Distinctive-token boosts: rank within each brand's cap by form-factor and
   // CPU family match so that e.g. HP SFF i7 desktops beat HP keyboards/monitors
   // for a source product that is an SFF i7 desktop.
-  const ffToken = extractFormFactor(opts.sourceDescription);
+  const ffGroup   = resolveFormFactorGroup(opts.sourceDescription);
   const cpuFamily = extractCpuFamily(opts.sourceDescription);
 
-  // Build ILIKE patterns; null → emit literal 0 (no boost).
-  const ffBoostExpr = ffToken != null
-    ? sql`CASE WHEN p.description ILIKE ${`%${ffToken}%`} THEN 10 ELSE 0 END`
-    : sql.raw(`0`);
+  // Form-factor boost: match on ANY synonym token in the group so that a MICRO
+  // source boosts candidates with MFF/MINI/TINY/NUC (same chassis family).
+  const ffBoostExpr = (() => {
+    if (ffGroup === null) return sql.raw(`0`);
+    const tokens = formFactorGroupTokens(ffGroup);
+    const orClauses = tokens.map((t) => sql`p.description ILIKE ${`%${t}%`}`);
+    return sql`CASE WHEN (${sql.join(orClauses, sql` OR `)}) THEN 10 ELSE 0 END`;
+  })();
+
   // CPU: append '-' so "%I7-%" matches "I7-13700" but not "I7" in unrelated strings.
   const cpuBoostExpr = cpuFamily != null
     ? sql`CASE WHEN p.description ILIKE ${`%${cpuFamily}-%`} THEN 5 ELSE 0 END`
     : sql.raw(`0`);
+
+  // Chassis class hard-filter at retrieval: exclude incompatible chassis types
+  // to free candidate pool slots for genuinely comparable products.
+  // AIO and tablet are excluded only at guard time (soft exclude), not here.
+  const sourceChassisClass = detectChassisClass(opts.sourceDescription);
+  const chassisFilterExpr = (() => {
+    if (sourceChassisClass === "laptop") {
+      // Laptop source: exclude any candidate that looks like a desktop
+      return sql.raw(`NOT (p.description ~* '\\m(DESKTOP|MFF|MICRO|MINI|TINY|NUC|SFF|TOWER|TWR|THINKCENTRE|PRODESK|ELITEDESK|EXPERTCENTRE)\\M')`);
+    }
+    if (sourceChassisClass === "desktop") {
+      // Desktop source: exclude any candidate that looks like a laptop
+      return sql.raw(`NOT (p.description ~* '\\m(NOTEBOOK|LAPTOP|THINKPAD|ELITEBOOK|PROBOOK|THINKBOOK|EXPERTBOOK|TRAVELMATE)\\M')`);
+    }
+    return sql.raw(`TRUE`);
+  })();
 
   const bundleExclude = sql.raw(`NOT COALESCE(
     CASE
@@ -235,6 +259,7 @@ async function getCandidates(opts: {
         AND ${bundleExclude}
         AND p.description != ''
         AND RIGHT(p.vpn_display, 3) != '_NZ'
+        AND ${chassisFilterExpr}
     ),
     ranked AS (
       SELECT *,

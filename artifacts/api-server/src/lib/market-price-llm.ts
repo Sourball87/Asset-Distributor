@@ -196,6 +196,105 @@ export function extractFormFactor(desc: string): string | null {
   return null;
 }
 
+// ── Form-factor synonym groups ─────────────────────────────────────────────
+//
+// Raw token matching (extractFormFactor above) sees MFF ≠ MINI even though
+// both are the same physical chassis class. resolveFormFactorGroup maps the
+// raw tokens to a named group so the guard compares groups, not tokens.
+//
+// Priority ordering matters: MFF/MICRO/MINI/TINY/NUC are checked before
+// SFF/SLIM so that "ASUS NUC 14 ESSENTIAL SLIM MINI PC" resolves to
+// small-desktop (MINI found first), not sff (SLIM).
+
+export type FormFactorGroup = "small-desktop" | "sff" | "tower" | "aio";
+
+/** Token vocabulary confirmed from a 20K-row DB survey (2025-08). */
+const FF_GROUP_TOKENS: Record<FormFactorGroup, string[]> = {
+  "small-desktop": ["MFF", "MICRO", "MINI", "TINY", "NUC"],
+  "sff":           ["SFF", "SLIM"],
+  "tower":         ["TOWER", "TWR"],
+  "aio":           ["AIO"],
+};
+
+const WB = (t: string) => new RegExp(`(?<![A-Z0-9])${t}(?![A-Z0-9])`);
+
+/** ALL synonym tokens for a group, for building SQL boost expressions. */
+export function formFactorGroupTokens(group: FormFactorGroup): string[] {
+  return FF_GROUP_TOKENS[group];
+}
+
+/**
+ * Map a product description to a form-factor group, or null when undetermined.
+ *
+ * Returns the canonical group name, not a raw token. Two products in the same
+ * group are form-factor-compatible (no guard demotion); different groups → demote.
+ */
+export function resolveFormFactorGroup(desc: string): FormFactorGroup | null {
+  const upper = desc.toUpperCase();
+  for (const [group, tokens] of Object.entries(FF_GROUP_TOKENS) as [FormFactorGroup, string[]][]) {
+    for (const t of tokens) {
+      if (WB(t).test(upper)) return group;
+    }
+  }
+  // AIO with spaces (not caught by word-boundary token scan above)
+  if (upper.includes("ALL-IN-ONE") || upper.includes("ALL IN ONE")) return "aio";
+  return null;
+}
+
+// ── Chassis class detection ────────────────────────────────────────────────
+//
+// Used for hard-drop of incompatible chassis pairings (laptop ↔ desktop).
+// AIO and tablet remain soft excludes (demote, not drop) because their
+// candidate pool is smaller and cross-class comparisons are occasionally valid.
+
+export type ChassisClass = "laptop" | "desktop" | "aio" | "tablet";
+
+/**
+ * Classify a product description into a chassis class, or null if undetermined.
+ *
+ * Laptop signals: NOTEBOOK/LAPTOP keywords OR product-family names that are
+ * exclusively laptops (ThinkPad, EliteBook, ProBook, ThinkBook, ExpertBook, TravelMate).
+ *
+ * Desktop signals: any form-factor group token (via resolveFormFactorGroup) OR
+ * explicit DESKTOP keyword / brand desktop product-line names.
+ */
+export function detectChassisClass(desc: string): ChassisClass | null {
+  const upper = desc.toUpperCase();
+
+  // AIO: check before generic desktop because AIO is a desktop sub-type but
+  // is kept separate for soft-exclude purposes.
+  if (/(?<![A-Z0-9])AIO(?![A-Z0-9])/.test(upper) ||
+      upper.includes("ALL-IN-ONE") ||
+      upper.includes("ALL IN ONE")) {
+    return "aio";
+  }
+
+  // Tablet: TABLET keyword or Surface Pro (which is a tablet/detachable,
+  // not Surface Laptop which is a clamshell laptop).
+  if (/(?<![A-Z0-9])TABLET(?![A-Z0-9])/.test(upper) ||
+      /SURFACE PRO(?!\s*KEYBOARD)/.test(upper)) {
+    return "tablet";
+  }
+
+  // Laptop: keyword signals
+  if (/(?<![A-Z0-9])(NOTEBOOK|LAPTOP)(?![A-Z0-9])/.test(upper) ||
+      /(?<![A-Z0-9])(THINKPAD|ELITEBOOK|PROBOOK|THINKBOOK|EXPERTBOOK|TRAVELMATE)(?![A-Z0-9])/.test(upper) ||
+      /SURFACE LAPTOP/.test(upper)) {
+    return "laptop";
+  }
+
+  // Desktop: form-factor group or explicit product-line keyword
+  const ffGroup = resolveFormFactorGroup(desc);
+  if (ffGroup === "small-desktop" || ffGroup === "sff" || ffGroup === "tower") {
+    return "desktop";
+  }
+  if (/(?<![A-Z0-9])(DESKTOP|THINKCENTRE|PRODESK|ELITEDESK|EXPERTCENTRE)(?![A-Z0-9])/.test(upper)) {
+    return "desktop";
+  }
+
+  return null;
+}
+
 /**
  * Extract a normalised CPU family prefix from a description, or null.
  * Returns values like "I7", "I5", "U7", "R5" — identical strings mean same tier.
@@ -373,6 +472,11 @@ export interface DeterministicGuardOptions {
  * factor, OR (unless skipTierGuard) product-family tier can be extracted from
  * BOTH source and candidate descriptions and they differ.
  *
+ * Also hard-drops laptop↔desktop cross-class matches entirely (not just demoted)
+ * because a mini-PC or desktop is never a genuine alternative to a notebook.
+ * AIO and tablet remain soft excludes (demote only) because their candidate
+ * pool is smaller.
+ *
  * Never upgrades; never touches "partial" or "related".
  * Token / tier not extractable from either side → no demotion (safe fallback).
  */
@@ -382,25 +486,50 @@ export function applyDeterministicGuard<T extends GuardableMatch>(
   options: DeterministicGuardOptions = {},
 ): T[] {
   const { skipTierGuard = false } = options;
-  const sourceFf   = extractFormFactor(sourceDesc);
-  const sourceCpu  = extractCpuFamily(sourceDesc);
-  const sourceTier = skipTierGuard ? null : detectProductTier(sourceDesc);
+  const sourceFfGroup   = resolveFormFactorGroup(sourceDesc);
+  const sourceCpu       = extractCpuFamily(sourceDesc);
+  const sourceTier      = skipTierGuard ? null : detectProductTier(sourceDesc);
+  const sourceChassis   = detectChassisClass(sourceDesc);
 
-  return matches.map((m) => {
-    if (m.similarity !== "close") return m; // only "close" can be demoted
+  return matches.flatMap((m) => {
+    // ── Chassis class hard-drop ──────────────────────────────────────────
+    // Drop laptop↔desktop mismatches before any other check. A NUC or SFF
+    // desktop is never a ranging alternative to a notebook, and vice versa.
+    const candidateChassis = detectChassisClass(m.description);
+    if (
+      sourceChassis !== null &&
+      candidateChassis !== null &&
+      sourceChassis !== candidateChassis &&
+      ((sourceChassis === "laptop" && candidateChassis === "desktop") ||
+       (sourceChassis === "desktop" && candidateChassis === "laptop"))
+    ) {
+      logger.debug({
+        msg: "chassis-class drop",
+        sourceChassis,
+        candidateChassis,
+        candidate: m.description.slice(0, 80),
+      });
+      return []; // drop — do not include in results
+    }
 
-    const candidateFf   = extractFormFactor(m.description);
-    const candidateCpu  = extractCpuFamily(m.description);
-    const candidateTier = skipTierGuard ? null : detectProductTier(m.description);
+    if (m.similarity !== "close") return [m]; // only "close" can be demoted
 
+    const candidateFfGroup = resolveFormFactorGroup(m.description);
+    const candidateCpu     = extractCpuFamily(m.description);
+    const candidateTier    = skipTierGuard ? null : detectProductTier(m.description);
+
+    // Form-factor: compare resolved groups, not raw tokens.
+    // MFF vs MINI → both "small-desktop" → no demotion.
+    // MFF vs SFF  → "small-desktop" vs "sff" → demote.
     const ffDiffers =
-      sourceFf != null && candidateFf != null && sourceFf !== candidateFf;
+      sourceFfGroup != null && candidateFfGroup != null &&
+      sourceFfGroup !== candidateFfGroup;
     const cpuDiffers =
       sourceCpu != null && candidateCpu != null && sourceCpu !== candidateCpu;
     const tierDiffers =
       sourceTier != null && candidateTier != null && sourceTier !== candidateTier;
 
-    if (!ffDiffers && !cpuDiffers && !tierDiffers) return m;
+    if (!ffDiffers && !cpuDiffers && !tierDiffers) return [m];
 
     const tags: string[] = [];
     if (ffDiffers)  tags.push("form-factor differs");
@@ -413,11 +542,11 @@ export function applyDeterministicGuard<T extends GuardableMatch>(
       );
     }
 
-    return {
+    return [{
       ...m,
       similarity: "partial" as const,
       reason: `${m.reason} [${tags.join(", ")}]`,
-    };
+    }];
   });
 }
 
@@ -641,6 +770,11 @@ when deciding what to stock. Use your knowledge of specifications, product-line 
 and price positioning. \
 Where several brands have genuinely comparable options, include a spread of brands rather than \
 many variants from one.
+
+Only compare products of the same physical type — laptops with laptops, desktops with desktops. \
+Never match a mini-PC, NUC, SFF desktop, tower, or any other desktop form factor to a notebook, \
+and never match a notebook to a desktop. If the source is a notebook, ignore any desktop candidates. \
+If the source is a desktop, ignore any notebook candidates.
 
 For each match give a similarity of "close", "partial", or "related", and a one-sentence reason \
 specific to that candidate — name its actual product line and say what makes it comparable or \
