@@ -578,16 +578,88 @@ describe("detectProductTier", () => {
     // Stored as: "HP ZBook 8 G1i FireFly 16' WUXGA Touch IR Intel U5-225H 16GB DDR5 512GB SSD WIN 11 PRO..."
     expect(detectProductTier("HP ZBook 8 G1i FireFly 16' WUXGA Touch IR Intel U5-225H 16GB DDR5 512GB SSD WIN 11 PRO")).toBe("mainstream");
   });
-  it("detects Dell Pro 5 desktop as mainstream — real DB description form", () => {
-    // Stored as bundle: "BUNDLE DELL PRO 5 DESKTOP, MICRO (MFF), U5-335 &..."
-    // Standalone hardware would be: "DELL PRO 5 DESKTOP, MICRO (MFF), U5-335, 16GB, 512GB, W11P, 3Y PRO"
-    expect(detectProductTier("DELL PRO 5 DESKTOP, MICRO (MFF), U5-335, 16GB, 512GB, W11P, 3Y PRO")).toBe("mainstream");
+  // ── Dell Pro — real stored descriptions (confirmed StockedItem candidates from DB) ──
+  it("detects Dell Pro 3 14\" as value — real DB description [CTO515_P314260_AU]", () => {
+    // Stored as: "DELL PRO 3 NOTEBOOK, 14\" FHD+IR, CORE 5-320, 16GB, 512GB, WL, W11P(AI), BLACK, 1YOS"
+    expect(detectProductTier('DELL PRO 3 NOTEBOOK, 14" FHD+IR, CORE 5-320, 16GB, 512GB, WL, W11P(AI), BLACK, 1YOS')).toBe("value");
   });
-  it("detects Dell Pro 3 as value — pattern match", () => {
-    expect(detectProductTier("DELL PRO 3 14 NOTEBOOK, 14\" FHD, U3-100, 8GB, 256GB, W11P, 1Y PRO")).toBe("value");
+  it("detects Dell Pro 3 16\" as value — real DB description [CTO515_P316260_AU]", () => {
+    // Stored as: "DELL PRO 3 NOTEBOOK, 16\" FHD+, CORE 5-320, 16GB, 512GB, WL, W11P(AI), BLACK, 1YOS"
+    expect(detectProductTier('DELL PRO 3 NOTEBOOK, 16" FHD+, CORE 5-320, 16GB, 512GB, WL, W11P(AI), BLACK, 1YOS')).toBe("value");
   });
-  it("detects Dell Pro Essential as value — pattern match", () => {
-    expect(detectProductTier("DELL PRO ESSENTIAL 14 NOTEBOOK, 14\" FHD, U3-100, 8GB, 256GB, W11P, 1Y PRO")).toBe("value");
+  it("detects Dell Pro 5 14\" notebook as mainstream — real DB description [CTO515_P514260_AU]", () => {
+    // Stored as: "DELL PRO 5 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3YOS"
+    expect(detectProductTier('DELL PRO 5 NOTEBOOK, 14" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3YOS')).toBe("mainstream");
+  });
+  it("detects Dell Pro 5 desktop MFF as mainstream — real DB description [BTP104_QCM1250_AU3Y via bundle]", () => {
+    // Stored as: "DELL PRO DESKTOP, MICRO (MFF), U5-235T, 16GB, 512GB, WL, W11P(AI), 3YOS"
+    // Note: matches /\bdell\s+pro\s+desktop\b/i (generic Pro Desktop pattern), not /\bdell\s+pro\s*5\b/i
+    expect(detectProductTier("DELL PRO DESKTOP, MICRO (MFF), U5-235T, 16GB, 512GB, WL, W11P(AI), 3YOS")).toBe("mainstream");
+  });
+  it("detects Dell Pro 5 desktop SFF as mainstream — real DB description [BTP009_QCS1250_AU]", () => {
+    expect(detectProductTier("DELL PRO DESKTOP, SLIM (SFF), i5-14500, 16GB, 512GB, NO-WL, W11P, 3YOS")).toBe("mainstream");
+  });
+  it("detects Dell Pro 7 13\" as mainstream — real DB description [CTO515_P713260_AU] (NOT value)", () => {
+    // Stored as: "DELL PRO 7 NOTEBOOK, 13\" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+) 3Y PRO"
+    // Price $2,999 — above Pro 5 mainstream ($2,369). Was incorrectly value in prior map.
+    expect(detectProductTier('DELL PRO 7 NOTEBOOK, 13" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+) 3Y PRO')).toBe("mainstream");
+  });
+  it("detects Dell Pro 7 14\" as mainstream — real DB description [CTO515_P714260_AU]", () => {
+    expect(detectProductTier('DELL PRO 7 NOTEBOOK, 14" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("mainstream");
+  });
+  it("detects Dell Pro 7 Convertible as mainstream — real DB description [CTO535_P704260_AU]", () => {
+    expect(detectProductTier('DELL PRO 7 CONVERTIBLE NOTEBOOK, 14" FHD+IR TOUCH, U5-335, 32GB, 512GB, WL, W11P(CP+), 3Y')).toBe("mainstream");
+  });
+  it("detects Dell Pro13 Plus as mainstream — real DB description [CTO515_PB13250_AU]", () => {
+    // Stored as: "DELL PRO13 PLUS NOTEBOOK, 13\" FHD+ IR, U5-236V, 16GB, 512GB, WL, W11P(CP+) 3Y PRO"
+    // Previous Plus pattern used 1[46] — would have MISSED Pro13 (13 not in [46]).
+    expect(detectProductTier('DELL PRO13 PLUS NOTEBOOK, 13" FHD+ IR, U5-236V, 16GB, 512GB, WL, W11P(CP+) 3Y PRO')).toBe("mainstream");
+  });
+  it("detects Dell Pro14 Plus as mainstream — real DB description [BTO215_PB14250_AU]", () => {
+    // Stored as: "DELL PRO14 PLUS NOTEBOOK, 14\" FHD+ IR, U7-266V, 16GB, 512GB, WL, W11P(CP+), 3Y PRO"
+    expect(detectProductTier('DELL PRO14 PLUS NOTEBOOK, 14" FHD+ IR, U7-266V, 16GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("mainstream");
+  });
+  it("detects Dell Pro16 Plus as mainstream — real DB description [BTO208_PB16250_AU]", () => {
+    expect(detectProductTier('DELL PRO16 PLUS NOTEBOOK, 16" FHD+ IR, U5-236V, 16GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("mainstream");
+  });
+  it("detects Dell Pro13 Premium as flagship — real DB description [BTO201_PA13250_AU]", () => {
+    // Stored as: "DELL PRO13 PREMIUM NOTEBOOK, 13.3\" FHD+ IR, U5-236V, 16GB, 512GB, WL, W11P(CP+), 3Y PRO"
+    expect(detectProductTier('DELL PRO13 PREMIUM NOTEBOOK, 13.3" FHD+ IR, U5-236V, 16GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("flagship");
+  });
+  it("detects Dell Pro14 Premium as flagship — real DB description [BTO203_PA14250_AU]", () => {
+    // Stored as: "DELL PRO14 PREMIUM NOTEBOOK, 14\" FHD+ IR, U5-238V, 32GB, 512GB, WL, W11P(CP+), 3Y PRO"
+    expect(detectProductTier('DELL PRO14 PREMIUM NOTEBOOK, 14" FHD+ IR, U5-238V, 32GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("flagship");
+  });
+  it("detects Dell Pro14 E as value — real DB description [CTO515_PV14260_AU]", () => {
+    // Stored as: "DELL PRO14 E NOTEBOOK, 14\" FHD+, U5-235U, 16GB, 512B, WL, W11P(AI), 1YOS"
+    expect(detectProductTier('DELL PRO14 E NOTEBOOK, 14" FHD+, U5-235U, 16GB, 512B, WL, W11P(AI), 1YOS')).toBe("value");
+  });
+  it("detects Dell Pro14 E (older Core 5 model) as value — real DB description [PV14250B]", () => {
+    // Stored as: "DELL PRO14 E NOTEBOOK, 14\" FHD+, CORE 5-120U, 16GB, 512GB, WL, W11P, 1YOS"
+    expect(detectProductTier('DELL PRO14 E NOTEBOOK, 14" FHD+, CORE 5-120U, 16GB, 512GB, WL, W11P, 1YOS')).toBe("value");
+  });
+  it("detects Dell Pro14 NOTEBOOK (standard base) as value — real DB description [BTP105_PC14250_AU3Y]", () => {
+    // Stored as: "DELL PRO14 NOTEBOOK, 14\" FHD+ IR, U5-235U, 16GB, 512GB, WL, W11P(AI), SILVER, 3YOS"
+    // This is the base/standard Pro14 (no tier suffix) — cheapest notebook line at $1,949.
+    expect(detectProductTier('DELL PRO14 NOTEBOOK, 14" FHD+ IR, U5-235U, 16GB, 512GB, WL, W11P(AI), SILVER, 3YOS')).toBe("value");
+  });
+  it("detects Dell Pro ESS Desktop as value — real DB description [BTOR003B_QVS1260_AU]", () => {
+    // Stored as: "DELL PRO ESS DESKTOP, SLIM (SFF), i5-14500, 8GB, 512GB, WL, W11P, 1YOS"
+    expect(detectProductTier("DELL PRO ESS DESKTOP, SLIM (SFF), i5-14500, 8GB, 512GB, WL, W11P, 1YOS")).toBe("value");
+  });
+  it("detects Dell Pro Essential warranty description as value (pattern coverage)", () => {
+    // DPVL* VPNs are warranty upgrades — real stored form includes "DELL PRO ESSENTIAL 14 & 15..."
+    expect(detectProductTier("DELL PRO ESSENTIAL 14 & 15 PV14250 / PV14255 / PV15250 / PV15255 1Y ONSITE TO 3Y PRO")).toBe("value");
+  });
+  it("detects Dell Pro14 Max as flagship — inferred base description form [CTO715R5_MC14250_AU]", () => {
+    // Bundle: "DELL PRO14 MAX NOTEBOOK, 14\" FHD+IR, U7-265H & SD25 DOCK FOR $150"
+    // Base hardware: "DELL PRO14 MAX NOTEBOOK, 14\" FHD+IR, U7-265H, 32GB, 512GB, WL, W11P(CP+), 3Y PRO"
+    expect(detectProductTier('DELL PRO14 MAX NOTEBOOK, 14" FHD+IR, U7-265H, 32GB, 512GB, WL, W11P(CP+), 3Y PRO')).toBe("flagship");
+  });
+  it("detects Dell Pro14 Max Premium as flagship — inferred base description form", () => {
+    // Bundle: "DELL PRO14 MAX PREMIUM, 14\"FHD+IR, U7-265H & BONUS SAMSUNG PHONE"
+    // Previous /pro\w*\s+premium/i missed this: "PRO14 MAX PREMIUM" has "MAX" between proWORD and "premium"
+    expect(detectProductTier('DELL PRO14 MAX PREMIUM NOTEBOOK, 14" FHD+IR, U7-265H, 32GB, 1TB, WL, W11P(CP+), 3Y PRO')).toBe("flagship");
   });
   it("does not misfire Dell Pro 5 pattern on keyboard (DELL KB526 PRO 5)", () => {
     // /\bdell\s+pro\s*5\b/i requires DELL immediately before PRO — KB526 is between them
@@ -652,12 +724,18 @@ describe("detectProductTier", () => {
   it("detects HP ProBook as value", () => {
     expect(detectProductTier("HP PROBOOK 440 G11 14 WUXGA U5-125U 16GB 512GB W11P")).toBe("value");
   });
-  it("detects Dell Pro 7 as value commercial", () => {
-    expect(detectProductTier("DELL PRO 7 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3Y PRO")).toBe("value");
+  it("detects Dell Pro 7 as mainstream (NOT value) — idealised form", () => {
+    // Pro 7 moved from value to mainstream: $2,999 (13\") > Pro 5 mainstream ($2,369)
+    expect(detectProductTier("DELL PRO 7 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3Y PRO")).toBe("mainstream");
   });
-  it("does not misfire Pro 7 pattern on Pro 7500 (digit not at word boundary)", () => {
-    // "PRO 7500" should not match /\bpro\s*7\b/
-    expect(detectProductTier("DELL PRO DESKTOP 7500 I7-10700 16GB W11P")).not.toBe("value");
+  it("does not misfire Dell Pro 7 pattern on Pro 7500 (7 not at word boundary in 7500)", () => {
+    // "DELL PRO 7500 DESKTOP" — 7 in 7500 is NOT at a word boundary (\b), so /\bdell\s+pro\s*7\b/ must not match.
+    // Note: "DELL PRO DESKTOP 7500" correctly DOES return mainstream via the Pro Desktop pattern.
+    expect(detectProductTier("DELL PRO 7500 DESKTOP I7-10700 16GB W11P")).toBeNull();
+  });
+  it("detects legacy DELL PRO DESKTOP 7500 as mainstream (correctly matched by Pro Desktop pattern)", () => {
+    // "DELL PRO DESKTOP 7500" — matches /\bdell\s+pro\s+desktop\b/i → mainstream commercial desktop.
+    expect(detectProductTier("DELL PRO DESKTOP 7500 I7-10700 16GB W11P")).toBe("mainstream");
   });
 
   // CONSUMER

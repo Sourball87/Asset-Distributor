@@ -19,9 +19,9 @@ description: Confirmed product-family tier placements for the SYSTEM_PROMPT and 
 
 **How to apply:** The `MARKET_PRICE_PROMPT=strict` env var switches to the strict rulebook without code change. Do not re-enable `skipTierGuard` in the route — it was a temporary A/B flag.
 
-## Dell Pro 7 = VALUE COMMERCIAL
+## Dell Pro 7 = MAINSTREAM (corrected from earlier wrong assumption)
 
-`/\bpro\s*7\b/i` pattern added to value commercial in FAMILY_TIER_MAP. "DELL PRO 7 NOTEBOOK" is value tier. Pattern has word-boundary guard so "PRO 7500" does not match.
+`/\bdell\s+pro\s*7\b/i` in the mainstream block. "DELL PRO 7 NOTEBOOK, 13/14\" FHD+IR, U5-335/U7-365, W11P(CP+) 3Y PRO" is $2,999+ — priced above Pro 5 mainstream ($2,369). Earlier assumption of "value" was wrong. Pattern requires "DELL" immediately before "PRO 7" so keyboards (DELL KB526 PRO 5) and old desktops (DELL PRO 7500) do not misfire.
 
 ## Distributor descriptions omit brand prefixes — always query real DB descriptions for new tests
 
@@ -32,7 +32,7 @@ Confirmed pattern: some distributors store "LENOVO X1 CARBON G13 AURA U7-268V VP
 After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Essential:
 - LENOVO 25.4% matched (368/1450 HW rows) — remaining unmatched are AIO desktops (M90A), ThinkCentre, ThinkPad P-series (workstation), and warranty descriptions that passed the HW filter via "MAINSTREAM"/"NOTEBOOK" tokens.
 - HP 3.6% matched (138/3814) — misleadingly low: HP care packs include the word "NOTEBOOK" so they pass the HW filter; actual commercial notebook lines (EliteBook, ProBook, ZBook) ARE covered by patterns. Residual are service/FRU items that can't be candidates in the pipeline.
-- DELL 24.6% matched (76/309) — unmatched are AIO desktops (Pro 24 AIO Plus), Precision workstations, bundles. Dell Pro 3/5/Essential hardware not yet stocked as standalone VPNs (only warranty/bundle items in DB), but patterns are in place for when they arrive.
+- DELL 59.6% matched (189/317 client HW rows) — up from 24.6%. Remaining 40% unmatched are server SSDs/CPUs/memory/GPUs that pass the GB-token HW filter but can never be candidates in a client-hardware comparison. All actual Dell Pro commercial notebooks and desktops are now matched. Dell Pro 3/5/7/Essential hardware uses CTO/BTO/BTP VPN prefixes with sku_type=StockedItem — they ARE candidates.
 - MICROSOFT 90.6% (347/383) — Surface Laptop/Pro well covered; 36 unmatched are FRU repair parts.
 - ASUS 1.2% — only NUC mini PCs and gaming motherboards; no commercial ExpertBook laptops in catalogue.
 
