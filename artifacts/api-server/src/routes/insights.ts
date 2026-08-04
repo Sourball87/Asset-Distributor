@@ -41,10 +41,18 @@ function buildSharedCtes(): string {
       ORDER BY ss.product_id, ss.distributor_id, ss.snapshot_date DESC, ss.id DESC
     ),
     current_upload AS (
+      -- MAX(snapshot_date) scoped to uploads that contain this brand's products.
+      -- Without the brand filter, a distributor whose latest upload covers only
+      -- other brands gets a "current date" that has no rows for this brand,
+      -- which silently drops that distributor from the competitor set.
       SELECT distributor_id, MAX(snapshot_date) AS current_date
       FROM uploads
       WHERE status = 'committed'
-        AND EXISTS (SELECT 1 FROM stock_snapshots ss WHERE ss.upload_id = uploads.id)
+        AND EXISTS (
+          SELECT 1 FROM stock_snapshots ss
+          WHERE ss.upload_id = uploads.id
+            AND ss.product_id IN (SELECT id FROM brand_products)
+        )
       GROUP BY distributor_id
     ),
     current_ss AS (
