@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Loader2, RefreshCw, Search, Zap } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw, Search, X, Zap } from "lucide-react";
 
 // ── Types (mirroring OpenAPI schemas) ────────────────────────────────────
 
@@ -54,6 +54,13 @@ interface ProductSuggestion {
   vpnDisplay: string;
   brand: string;
   description: string;
+}
+
+// A single item in a multi-result list (one entry per searched SKU / spec).
+interface ResultItem {
+  source: string;
+  result: MarketPriceResult | null;
+  error: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -223,31 +230,86 @@ function ResultsTable({ result }: { result: MarketPriceResult }) {
   );
 }
 
-// ── Source product card ───────────────────────────────────────────────────
+// ── Single result section (used for both SKU and spec results) ────────────
 
-function SourceCard({ source }: { source: MarketPriceSource }) {
-  return (
-    <div className="border border-border rounded-sm bg-card p-3 text-sm mb-4">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-        Source product
+function ResultSection({ item, index, total }: { item: ResultItem; index: number; total: number }) {
+  if (item.error) {
+    return (
+      <div className="space-y-2">
+        {total > 1 && (
+          <div className="text-xs font-semibold text-muted-foreground font-mono">
+            {item.source}
+          </div>
+        )}
+        <Alert variant="destructive" className="rounded-sm">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="text-xs">{item.error}</AlertDescription>
+        </Alert>
       </div>
-      {source.vpnDisplay ? (
-        <div className="flex flex-wrap items-baseline gap-3">
-          <span className="font-semibold text-xs">{source.brand}</span>
-          <span className="font-mono text-xs">{source.vpnDisplay}</span>
-          <span className="text-xs text-muted-foreground">{source.description}</span>
+    );
+  }
+
+  const result = item.result;
+  if (!result) return null;
+
+  return (
+    <div className="space-y-3">
+      {/* Per-SKU heading when multiple results */}
+      {total > 1 && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-muted text-[10px] font-bold text-muted-foreground shrink-0">
+            {index + 1}
+          </span>
+          <span className="font-mono text-sm font-semibold">{result.source.vpnDisplay ?? item.source}</span>
+          {result.source.brand && (
+            <span className="text-xs text-muted-foreground">{result.source.brand}</span>
+          )}
         </div>
-      ) : (
-        <div className="text-xs text-muted-foreground italic">{source.description}</div>
       )}
-      {source.prices.length > 0 && (
-        <div className="flex flex-wrap gap-3 mt-2">
-          {source.prices.map((p) => (
-            <div key={p.distributorId} className="text-xs">
-              <span className="text-muted-foreground">{p.distributorName}: </span>
-              <span className="font-mono">{fmtPrice(p.sellPrice)}</span>
+
+      {/* Meta strip */}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {result.cached && (
+          <Badge variant="outline" className="text-[10px] font-mono">
+            Cached result
+          </Badge>
+        )}
+        <span>{result.candidatesEvaluated} candidates evaluated</span>
+        <span className="flex items-center gap-1">
+          <Zap className="h-3 w-3" /> {result.model}
+        </span>
+      </div>
+
+      <ResultsTable result={result} />
+
+      {result.matches.length === 0 && (
+        <div className="border border-border rounded-sm px-4 py-6 text-center bg-card space-y-1">
+          <div className="text-sm text-muted-foreground">
+            {result.notCoveredMessage ?? "No comparable products found in current feeds."}
+          </div>
+          {result.notCovered && (
+            <div className="text-xs text-muted-foreground/60 italic">
+              Try searching for a specific product SKU using the &quot;By SKU&quot; tab, or broaden the spec.
             </div>
-          ))}
+          )}
+        </div>
+      )}
+
+      {result.brandsNotInBand && result.brandsNotInBand.length > 0 && (
+        <div className="border border-border rounded-sm px-4 py-3 bg-card">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">
+            Tracked brands with no products in this price range:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {result.brandsNotInBand.map((b) => (
+              <span
+                key={b}
+                className="inline-block px-2 py-0.5 rounded border border-border text-[11px] text-muted-foreground bg-muted"
+              >
+                {b}
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -257,55 +319,97 @@ function SourceCard({ source }: { source: MarketPriceSource }) {
 // ── SKU search tab ────────────────────────────────────────────────────────
 
 function SkuTab({
-  onResult,
+  onResults,
   onLoading,
   onError,
 }: {
-  onResult: (r: MarketPriceResult | null) => void;
+  onResults: (r: ResultItem[]) => void;
   onLoading: (v: boolean) => void;
   onError: (msg: string, retry: () => void) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedProduct, setSelectedProduct] = useState<ProductSuggestion | null>(null);
+  const [selectedProducts, setSelectedProducts] = useState<ProductSuggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
 
-  const { data: suggestions = [], isFetching } = useProductSearch(
-    selectedProduct ? "" : query,
-  );
+  const { data: suggestions = [], isFetching } = useProductSearch(query);
 
   const search = useMutation({
-    mutationFn: (productId: number) =>
-      fetchJson<MarketPriceResult>(`/api/experimental/market-price?productId=${productId}`),
+    mutationFn: async (products: ProductSuggestion[]): Promise<ResultItem[]> => {
+      const settled = await Promise.allSettled(
+        products.map((p) =>
+          fetchJson<MarketPriceResult>(`/api/experimental/market-price?productId=${p.id}`),
+        ),
+      );
+      return products.map((p, i) => ({
+        source: `${p.vpnDisplay} — ${p.brand}`,
+        result: settled[i].status === "fulfilled" ? settled[i].value : null,
+        error:
+          settled[i].status === "rejected"
+            ? (settled[i] as PromiseRejectedResult).reason?.message ?? "Unknown error"
+            : null,
+      }));
+    },
     onMutate: () => onLoading(true),
     onSettled: () => onLoading(false),
-    onSuccess: (data) => onResult(data),
+    onSuccess: (data) => onResults(data),
     onError: (err: Error) => {
-      onResult(null);
-      onError(err.message, () => { if (selectedProduct) search.mutate(selectedProduct.id); });
+      onResults([]);
+      onError(err.message, () => search.mutate(selectedProducts));
     },
   });
 
   const handleSelect = (p: ProductSuggestion) => {
-    setSelectedProduct(p);
-    setQuery(`${p.vpnDisplay} — ${p.brand}`);
+    if (!selectedProducts.find((s) => s.id === p.id)) {
+      setSelectedProducts((prev) => [...prev, p]);
+    }
+    setQuery("");
     setShowDropdown(false);
   };
 
-  const handleSearch = () => {
-    if (!selectedProduct) return;
-    onResult(null);
-    search.mutate(selectedProduct.id);
+  const removeProduct = (id: number) => {
+    setSelectedProducts((prev) => prev.filter((p) => p.id !== id));
   };
+
+  const handleSearch = () => {
+    if (selectedProducts.length === 0) return;
+    onResults([]);
+    search.mutate(selectedProducts);
+  };
+
+  const count = selectedProducts.length;
 
   return (
     <div className="space-y-3">
+      {/* Selected SKU tags */}
+      {selectedProducts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedProducts.map((p) => (
+            <span
+              key={p.id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted text-xs font-mono"
+            >
+              {p.vpnDisplay}
+              <span className="text-muted-foreground text-[10px] font-sans ml-0.5">{p.brand}</span>
+              <button
+                type="button"
+                onClick={() => removeProduct(p.id)}
+                className="ml-0.5 text-muted-foreground hover:text-foreground rounded-sm focus:outline-none"
+                aria-label={`Remove ${p.vpnDisplay}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Autocomplete input */}
       <div className="relative">
         <Input
-          placeholder="Type a VPN or product name..."
+          placeholder={count === 0 ? "Type a VPN or product name..." : "Add another SKU..."}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            setSelectedProduct(null);
             setShowDropdown(true);
           }}
           onFocus={() => setShowDropdown(true)}
@@ -319,32 +423,43 @@ function SkuTab({
                 <Loader2 className="h-3 w-3 animate-spin" /> Searching...
               </div>
             )}
-            {suggestions.map((s) => (
-              <button
-                key={s.id}
-                className="w-full text-left px-3 py-2 text-xs hover:bg-muted/60 border-b border-border last:border-0"
-                onMouseDown={() => handleSelect(s)}
-              >
-                <span className="font-mono font-semibold">{s.vpnDisplay}</span>
-                <span className="text-muted-foreground ml-2">{s.brand}</span>
-                <div className="text-muted-foreground truncate">{s.description}</div>
-              </button>
-            ))}
+            {suggestions.map((s) => {
+              const already = selectedProducts.some((p) => p.id === s.id);
+              return (
+                <button
+                  key={s.id}
+                  className={`w-full text-left px-3 py-2 text-xs border-b border-border last:border-0 ${
+                    already
+                      ? "opacity-40 cursor-default"
+                      : "hover:bg-muted/60 cursor-pointer"
+                  }`}
+                  onMouseDown={() => !already && handleSelect(s)}
+                >
+                  <span className="font-mono font-semibold">{s.vpnDisplay}</span>
+                  <span className="text-muted-foreground ml-2">{s.brand}</span>
+                  {already && <span className="text-muted-foreground ml-2 italic">already added</span>}
+                  <div className="text-muted-foreground truncate">{s.description}</div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
+
       <Button
         onClick={handleSearch}
-        disabled={!selectedProduct || search.isPending}
+        disabled={count === 0 || search.isPending}
         className="gap-2"
       >
         {search.isPending ? (
           <>
-            <Loader2 className="h-4 w-4 animate-spin" /> Analyzing catalogue...
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Analyzing {count} SKU{count !== 1 ? "s" : ""}...
           </>
         ) : (
           <>
-            <Search className="h-4 w-4" /> Find equivalents
+            <Search className="h-4 w-4" />
+            Find equivalents{count > 1 ? ` (${count} SKUs)` : ""}
           </>
         )}
       </Button>
@@ -355,11 +470,11 @@ function SkuTab({
 // ── Spec search tab ───────────────────────────────────────────────────────
 
 function SpecTab({
-  onResult,
+  onResults,
   onLoading,
   onError,
 }: {
-  onResult: (r: MarketPriceResult | null) => void;
+  onResults: (r: ResultItem[]) => void;
   onLoading: (v: boolean) => void;
   onError: (msg: string, retry: () => void) => void;
 }) {
@@ -375,9 +490,10 @@ function SpecTab({
       }),
     onMutate: () => onLoading(true),
     onSettled: () => onLoading(false),
-    onSuccess: (data) => onResult(data),
+    onSuccess: (data) =>
+      onResults([{ source: specText.slice(0, 60), result: data, error: null }]),
     onError: (err: Error) => {
-      onResult(null);
+      onResults([]);
       const retryBody: { specText: string; maxPrice?: number } = { specText };
       const p = parseFloat(maxPrice);
       if (!isNaN(p) && p > 0) retryBody.maxPrice = p;
@@ -387,7 +503,7 @@ function SpecTab({
 
   const handleSearch = () => {
     if (!specText.trim()) return;
-    onResult(null);
+    onResults([]);
     const body: { specText: string; maxPrice?: number } = { specText };
     const p = parseFloat(maxPrice);
     if (!isNaN(p) && p > 0) body.maxPrice = p;
@@ -435,16 +551,26 @@ function SpecTab({
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function MarketPrice() {
-  const [result, setResult] = useState<MarketPriceResult | null>(null);
+  const [results, setResults] = useState<ResultItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState<{ message: string; retry: () => void } | null>(null);
 
-  const handleResult = useCallback((r: MarketPriceResult | null) => setResult(r), []);
+  const handleResults = useCallback((r: ResultItem[]) => {
+    setResults(r);
+    setSearchError(null);
+  }, []);
+
   const handleLoading = useCallback((v: boolean) => {
     setIsLoading(v);
-    if (v) setSearchError(null); // clear error when a new search starts
+    if (v) setSearchError(null);
   }, []);
-  const handleError = useCallback((msg: string, retry: () => void) => setSearchError({ message: msg, retry }), []);
+
+  const handleError = useCallback(
+    (msg: string, retry: () => void) => setSearchError({ message: msg, retry }),
+    [],
+  );
+
+  const hasResults = results.length > 0;
 
   return (
     <div className="space-y-4">
@@ -472,10 +598,10 @@ export default function MarketPrice() {
             <TabsTrigger value="spec" className="text-xs h-7">By specs</TabsTrigger>
           </TabsList>
           <TabsContent value="sku">
-            <SkuTab onResult={handleResult} onLoading={handleLoading} onError={handleError} />
+            <SkuTab onResults={handleResults} onLoading={handleLoading} onError={handleError} />
           </TabsContent>
           <TabsContent value="spec">
-            <SpecTab onResult={handleResult} onLoading={handleLoading} onError={handleError} />
+            <SpecTab onResults={handleResults} onLoading={handleLoading} onError={handleError} />
           </TabsContent>
         </Tabs>
       </div>
@@ -488,7 +614,7 @@ export default function MarketPrice() {
         </div>
       )}
 
-      {/* Inline error with retry */}
+      {/* Top-level error (spec tab / unexpected failures) */}
       {!isLoading && searchError && (
         <div className="space-y-2">
           <Alert variant="destructive" className="rounded-sm">
@@ -508,53 +634,14 @@ export default function MarketPrice() {
       )}
 
       {/* Results */}
-      {!isLoading && !searchError && result && (
-        <div className="space-y-3">
-          {/* Meta strip */}
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            {result.cached && (
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Cached result
-              </Badge>
-            )}
-            <span>{result.candidatesEvaluated} candidates evaluated</span>
-            <span className="flex items-center gap-1">
-              <Zap className="h-3 w-3" /> {result.model}
-            </span>
-          </div>
-
-          <ResultsTable result={result} />
-
-          {result.matches.length === 0 && (
-            <div className="border border-border rounded-sm px-4 py-6 text-center bg-card space-y-1">
-              <div className="text-sm text-muted-foreground">
-                {result.notCoveredMessage ?? "No comparable products found in current feeds."}
-              </div>
-              {result.notCovered && (
-                <div className="text-xs text-muted-foreground/60 italic">
-                  Try searching for a specific product SKU using the &quot;By SKU&quot; tab, or broaden the spec.
-                </div>
-              )}
+      {!isLoading && !searchError && hasResults && (
+        <div className="space-y-6">
+          {results.map((item, i) => (
+            <div key={i}>
+              {i > 0 && <div className="border-t border-border mb-6" />}
+              <ResultSection item={item} index={i} total={results.length} />
             </div>
-          )}
-
-          {result.brandsNotInBand && result.brandsNotInBand.length > 0 && (
-            <div className="border border-border rounded-sm px-4 py-3 bg-card">
-              <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                Tracked brands with no products in this price range:
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {result.brandsNotInBand.map((b) => (
-                  <span
-                    key={b}
-                    className="inline-block px-2 py-0.5 rounded border border-border text-[11px] text-muted-foreground bg-muted"
-                  >
-                    {b}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          ))}
         </div>
       )}
     </div>
