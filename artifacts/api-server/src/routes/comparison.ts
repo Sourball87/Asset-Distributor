@@ -149,8 +149,15 @@ router.get("/comparison", requireAuth, async (req, res): Promise<void> => {
           'snapshotDate',    l.snapshot_date,
           'isCurrent',       (
             l.snapshot_date IS NOT NULL
-            AND dcd.current_date IS NOT NULL
-            AND l.snapshot_date >= dcd.current_date
+            AND (
+              -- Standard: snapshot is from this distributor's most recent upload
+              (dcd.current_date IS NOT NULL AND l.snapshot_date >= dcd.current_date)
+              -- Fallback: snapshot is within 14 days. Handles distributors that
+              -- send partial uploads (e.g. IT-hardware-only files that omit bags/
+              -- accessories). The product's last-seen price is still valid even
+              -- though a newer partial file arrived since.
+              OR l.snapshot_date >= CURRENT_DATE - INTERVAL '14 days'
+            )
           )
         ) ORDER BY d.is_baseline DESC, d.name
       ) AS distributor_data

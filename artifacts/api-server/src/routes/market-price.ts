@@ -293,32 +293,33 @@ async function getCandidates(opts: {
 // entire product catalogue falls outside the current search's price band.
 // Used to surface "STM has no products in this price range" in the response.
 
-async function getBrandsNotInBand(
-  sourceBrand: string,
-  priceLow: number,
-  priceHigh: number,
-): Promise<string[]> {
+/**
+ * Return tracked brand names that have at least one priced product,
+ * excluding the source brand. Used as a pre-fetch so the pipeline can
+ * diff against the actual candidate pool after retrieval.
+ *
+ * Brands not in the candidate pool (whether excluded by price band OR by
+ * zero keyword overlap) are surfaced to the user as "no matching products
+ * found in this search".
+ */
+async function getTrackedBrandsWithProducts(sourceBrand: string): Promise<string[]> {
   const rows = await db.execute<{ brand: string }>(sql`
     SELECT b.canonical_name AS brand
     FROM brands b
     WHERE b.reference_only = false
       AND b.canonical_name != ${sourceBrand}
       AND EXISTS (
-        SELECT 1 FROM products p WHERE p.brand = b.canonical_name
-      )
-      AND NOT EXISTS (
         SELECT 1
-        FROM products p2
+        FROM products p
         JOIN LATERAL (
           SELECT ss.sell_price
           FROM stock_snapshots ss
-          WHERE ss.product_id = p2.id
+          WHERE ss.product_id = p.id
           ORDER BY ss.snapshot_date DESC
           LIMIT 1
         ) latest ON true
-        WHERE p2.brand = b.canonical_name
+        WHERE p.brand = b.canonical_name
           AND latest.sell_price IS NOT NULL
-          AND latest.sell_price::numeric BETWEEN ${priceLow} AND ${priceHigh}
       )
     ORDER BY b.canonical_name
   `);
@@ -397,8 +398,11 @@ async function runPipeline(opts: {
     ? Math.min(opts.refPrice * PRICE_BAND_HIGH, opts.maxPrice)
     : opts.refPrice * PRICE_BAND_HIGH;
 
-  // Run candidate retrieval and brands-not-in-band check in parallel.
-  const [candidates, brandsNotInBand] = await Promise.all([
+  // Run candidate retrieval and tracked-brand list in parallel.
+  // After retrieval, diff the two to find tracked brands with no candidates
+  // — whether excluded by price band OR by zero keyword overlap (e.g. STM bags
+  // when the source is a NAS drive: in-band but no matching tokens).
+  const [candidates, trackedBrands] = await Promise.all([
     getCandidates({
       sourceBrand: opts.sourceBrand ?? "__NONE__",
       sourceDescription: opts.sourceDescription,
@@ -406,8 +410,11 @@ async function runPipeline(opts: {
       maxPrice: opts.maxPrice,
       excludeProductId: opts.productId ?? undefined,
     }),
-    getBrandsNotInBand(opts.sourceBrand ?? "__NONE__", priceLow, priceHigh),
+    getTrackedBrandsWithProducts(opts.sourceBrand ?? "__NONE__"),
   ]);
+
+  const candidateBrandSet = new Set(candidates.map((c) => c.brand));
+  const brandsNotInBand = trackedBrands.filter((b) => !candidateBrandSet.has(b));
 
   if (candidates.length === 0) {
     const empty: MarketPriceResponse = {

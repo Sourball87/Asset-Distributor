@@ -541,7 +541,7 @@ export default function MarketPrice() {
           {result.brandsNotInBand && result.brandsNotInBand.length > 0 && (
             <div className="border border-border rounded-sm px-4 py-3 bg-card">
               <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                Tracked brands with no products in this price range:
+                Tracked brands with no matching products in this search:
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {result.brandsNotInBand.map((b) => (
