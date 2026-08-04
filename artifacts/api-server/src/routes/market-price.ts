@@ -17,7 +17,7 @@
 
 import { Router } from "express";
 import { z } from "zod";
-import { db, marketPriceCacheTable, productsTable } from "@workspace/db";
+import { db, marketPriceCacheTable, productsTable, brandsTable } from "@workspace/db";
 import { eq, and, sql, gte } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import {
@@ -97,6 +97,8 @@ interface MarketPriceResponse {
   candidatesEvaluated: number;
   notCovered?: boolean;
   notCoveredMessage?: string;
+  /** Tracked brands that have products in the DB but none within this search's price band. */
+  brandsNotInBand?: string[];
 }
 
 // ── Helper: latest price per distributor for a set of product IDs ──────────
@@ -285,6 +287,44 @@ async function getCandidates(opts: {
   }));
 }
 
+// ── Helper: tracked brands with products in DB but none in this price band ─
+//
+// Returns brand names that a user might expect to see but won't, because their
+// entire product catalogue falls outside the current search's price band.
+// Used to surface "STM has no products in this price range" in the response.
+
+async function getBrandsNotInBand(
+  sourceBrand: string,
+  priceLow: number,
+  priceHigh: number,
+): Promise<string[]> {
+  const rows = await db.execute<{ brand: string }>(sql`
+    SELECT b.canonical_name AS brand
+    FROM brands b
+    WHERE b.reference_only = false
+      AND b.canonical_name != ${sourceBrand}
+      AND EXISTS (
+        SELECT 1 FROM products p WHERE p.brand = b.canonical_name
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM products p2
+        JOIN LATERAL (
+          SELECT ss.sell_price
+          FROM stock_snapshots ss
+          WHERE ss.product_id = p2.id
+          ORDER BY ss.snapshot_date DESC
+          LIMIT 1
+        ) latest ON true
+        WHERE p2.brand = b.canonical_name
+          AND latest.sell_price IS NOT NULL
+          AND latest.sell_price::numeric BETWEEN ${priceLow} AND ${priceHigh}
+      )
+    ORDER BY b.canonical_name
+  `);
+  return rows.rows.map((r) => r.brand);
+}
+
 // ── Helper: check + retrieve from 7-day cache ─────────────────────────────
 
 async function getCached(queryHash: string): Promise<MarketPriceResponse | null> {
@@ -352,14 +392,22 @@ async function runPipeline(opts: {
   // and zero-match branches to produce a "not covered" response.
   const classHint = detectClassHint(opts.sourceDescription);
 
-  // Candidate retrieval
-  const candidates = await getCandidates({
-    sourceBrand: opts.sourceBrand ?? "__NONE__",
-    sourceDescription: opts.sourceDescription,
-    refPrice: opts.refPrice,
-    maxPrice: opts.maxPrice,
-    excludeProductId: opts.productId ?? undefined,
-  });
+  const priceLow  = opts.refPrice * PRICE_BAND_LOW;
+  const priceHigh = opts.maxPrice != null
+    ? Math.min(opts.refPrice * PRICE_BAND_HIGH, opts.maxPrice)
+    : opts.refPrice * PRICE_BAND_HIGH;
+
+  // Run candidate retrieval and brands-not-in-band check in parallel.
+  const [candidates, brandsNotInBand] = await Promise.all([
+    getCandidates({
+      sourceBrand: opts.sourceBrand ?? "__NONE__",
+      sourceDescription: opts.sourceDescription,
+      refPrice: opts.refPrice,
+      maxPrice: opts.maxPrice,
+      excludeProductId: opts.productId ?? undefined,
+    }),
+    getBrandsNotInBand(opts.sourceBrand ?? "__NONE__", priceLow, priceHigh),
+  ]);
 
   if (candidates.length === 0) {
     const empty: MarketPriceResponse = {
@@ -375,6 +423,7 @@ async function runPipeline(opts: {
       model: LLM_MODEL,
       candidatesEvaluated: 0,
       ...(classHint ? { notCovered: true, notCoveredMessage: NOT_COVERED_MSG } : {}),
+      ...(brandsNotInBand.length > 0 ? { brandsNotInBand } : {}),
     };
     await putCache({ productId: opts.productId, queryHash: opts.queryHash, requestSummary: opts.requestSummary, response: empty });
     return empty;
@@ -440,6 +489,7 @@ async function runPipeline(opts: {
     ...(classHint && matches.length === 0
       ? { notCovered: true, notCoveredMessage: NOT_COVERED_MSG }
       : {}),
+    ...(brandsNotInBand.length > 0 ? { brandsNotInBand } : {}),
   };
 
   await putCache({ productId: opts.productId, queryHash: opts.queryHash, requestSummary: opts.requestSummary, response: result });

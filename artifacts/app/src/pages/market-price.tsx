@@ -46,6 +46,7 @@ interface MarketPriceResult {
   candidatesEvaluated: number;
   notCovered?: boolean;
   notCoveredMessage?: string;
+  brandsNotInBand?: string[];
 }
 
 interface ProductSuggestion {
@@ -534,6 +535,24 @@ export default function MarketPrice() {
                   Try searching for a specific product SKU using the &quot;By SKU&quot; tab, or broaden the spec.
                 </div>
               )}
+            </div>
+          )}
+
+          {result.brandsNotInBand && result.brandsNotInBand.length > 0 && (
+            <div className="border border-border rounded-sm px-4 py-3 bg-card">
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                Tracked brands with no products in this price range:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {result.brandsNotInBand.map((b) => (
+                  <span
+                    key={b}
+                    className="inline-block px-2 py-0.5 rounded border border-border text-[11px] text-muted-foreground bg-muted"
+                  >
+                    {b}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
