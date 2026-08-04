@@ -698,11 +698,28 @@ describe("detectProductTier", () => {
   it("detects ThinkPad X13 as mainstream (not flagship)", () => {
     expect(detectProductTier("LENOVO THINKPAD X13 GEN5 U5-125U 16GB 512GB W11P")).toBe("mainstream");
   });
-  it("detects HP EliteBook 6 as mainstream", () => {
-    expect(detectProductTier("HP ELITEBOOK 6 G1I 14 U7-255U 16GB 512GB W11P 3Y")).toBe("mainstream");
+  it("detects HP EliteBook 640 G11 as mainstream — real stored form", () => {
+    // Old pattern /elitebook\s+6\b/i failed on "640" (\b not satisfied between 6 and 4).
+    // Fixed to /elitebook\s+6\d{2}\b/i.
+    expect(detectProductTier("HP ELITEBOOK 640 G11 I5-1335U 8GB 256GB W11P 3Y NBD")).toBe("mainstream");
   });
-  it("detects HP EliteBook 8 as mainstream", () => {
-    expect(detectProductTier("HP ELITEBOOK 8 G1I 16 U7-256V 32GB 1TB W11P")).toBe("mainstream");
+  it("detects HP EliteBook 650 G11 as mainstream — real stored form", () => {
+    expect(detectProductTier("HP ELITEBOOK 650 G11 I5-1335U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
+  });
+  it("detects HP EliteBook 660 G11 as mainstream — real stored form", () => {
+    expect(detectProductTier("HP ELITEBOOK 660 G11 I7-1355U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
+  });
+  it("detects HP EliteBook 840 G11 as mainstream — real stored form", () => {
+    expect(detectProductTier("HP ELITEBOOK 840 G11 I5-1335U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
+  });
+  it("detects HP EliteBook 860 G11 as mainstream — real stored form", () => {
+    // Old pattern /elitebook\s+8\b/i failed on "860" (\b not satisfied between 8 and 6).
+    // Fixed to /elitebook\s+8\d{2}\b/i.
+    expect(detectProductTier("HP ELITEBOOK 860 G11 I7-1355U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
+  });
+  it("does not misfire EliteBook 6xx pattern on EliteBook X (X caught by flagship first)", () => {
+    // EliteBook X must remain flagship — order-dependent guard: flagship block runs before mainstream.
+    expect(detectProductTier("HP ELITEBOOK X 14 G11 I7-1355U 32GB 1TB W11P 3Y")).toBe("flagship");
   });
   it("detects HP EliteBook X as flagship", () => {
     expect(detectProductTier("HP ELITEBOOK X G11 14 U5-226V 16GB 512GB W11P")).toBe("flagship");

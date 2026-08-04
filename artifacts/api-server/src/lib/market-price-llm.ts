@@ -236,6 +236,17 @@ export type ProductTier = "flagship" | "mainstream" | "value" | "consumer";
  * Patterns are tested case-insensitively against the full product description.
  * FLAGSHIP entries must precede MAINSTREAM so e.g. "ThinkPad X1 Yoga" →
  * flagship before the bare "yoga" consumer pattern fires.
+ *
+ * Dell 2026 commercial ladder (web-verified):
+ *   3 = VALUE        (replaces Pro Base / Latitude 3xxx)
+ *   5 = MAINSTREAM   (replaces Pro Plus / Latitude 5xxx)
+ *   7 = MAINSTREAM   (upper-mainstream; revival of Latitude 7000; competes with ThinkPad T14s/X13, EliteBook 8)
+ *   Premium = FLAGSHIP
+ *   Max / Max Premium = FLAGSHIP  (mobile workstation)
+ *   Pro Precision 5/7 = FLAGSHIP  (coming soon — replaces Pro Max)
+ *   Legacy names still active: Pro Plus = mainstream, Pro Base/E/ESS = value
+ * NOTE: price alone is NOT a reliable tier signal — a high-config Pro 7 can exceed a low-config Premium.
+ *       Always use the product-line name, not price, to determine tier.
  */
 export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> = [
   // ── FLAGSHIP ────────────────────────────────────────────────────────────
@@ -252,7 +263,8 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /dragonfly/i,             // HP EliteBook Dragonfly
       /pro\w*\s+premium/i,      // Dell Pro Premium / Pro14 Premium / Pro13 Premium
       /\bpro\w+\s+max\s+premium\b/i,  // Dell Pro14 Max Premium — "MAX PREMIUM" missed by pro\w*\s+premium
-      /\bpro1[3-9]\s+max\b/i,   // Dell Pro14 Max / Pro16 Max (flagship mobile workstation tier)
+      /\bpro1[3-9]\s+max\b/i,   // Dell Pro14 Max / Pro16 Max (flagship mobile workstation)
+      /\bpro\s+precision\s*[57]\b/i,  // Dell Pro Precision 5/7 (coming soon — replaces Pro Max)
       /latitude\s+9\d{3}/i,     // Dell Latitude 9xxx (legacy naming)
     ],
   },
@@ -263,12 +275,12 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /thinkpad\s+t\d/i,               // T14, T14S, T15, T16, T13 … (THINKPAD-prefixed form)
       /\blenovo\s+t1[3-9]s?\b/i,       // "LENOVO T14 G7…", "LENOVO T14S G6…", "LENOVO T16 G4…" — distributor omits THINKPAD
       /thinkpad\s+x13\b/i,             // X13 (not X1, not X9)
-      /elitebook\s+6\b/i,              // HP EliteBook 6 series
-      /elitebook\s+8\b/i,              // HP EliteBook 8 series
-      /\bpro\s*(?:plus|1[3-9]\s*plus)\b/i, // Dell Pro Plus / Pro13 Plus / Pro14 Plus / Pro16 Plus (fixed: was 1[46])
-      /\bdell\s+pro\s*5\b/i,           // Dell Pro 5 Notebook/Desktop (mainstream numbered series)
-      /\bdell\s+pro\s*7\b/i,           // Dell Pro 7 Notebook ($2,999+, priced above Pro 5 mainstream — NOT value)
-      /\bdell\s+pro\s+desktop\b/i,     // Dell Pro Desktop MFF/SFF (standard, no tier suffix, ~$1,499–$1,749)
+      /elitebook\s+6\d{2}\b/i,          // HP EliteBook 6xx series (640, 650, 660, 680…) — real form: "ELITEBOOK 640 G11"
+      /elitebook\s+8\d{2}\b/i,          // HP EliteBook 8xx series (840, 850, 860…) — real form: "ELITEBOOK 860 G11"
+      /\bpro\s*(?:plus|1[3-9]\s*plus)\b/i, // Dell Pro Plus / Pro13 Plus / Pro14 Plus / Pro16 Plus (legacy label = mainstream)
+      /\bdell\s+pro\s*5\b/i,           // Dell Pro 5 (2026 mainstream numbered series — replaces Pro Plus)
+      /\bdell\s+pro\s*7\b/i,           // Dell Pro 7 (2026 upper-mainstream — revival of Latitude 7000; same tier as T14s/X13/EliteBook 8)
+      /\bdell\s+pro\s+desktop\b/i,     // Dell Pro Desktop MFF/SFF (standard, no tier suffix)
       /latitude\s+[57]\d{3}/i,         // Dell Latitude 5xxx / 7xxx (legacy)
       /expertbook\s+b5/i,
       /travelmate\s+p[46]/i,
@@ -289,12 +301,12 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /expertbook\s+b1/i,
       /travelmate\s+p2/i,
       /travelmate\s+b\d/i,
-      /\bpro\s*base\b/i,                       // Dell Pro Base (explicit tier word)
-      /\bdell\s+pro\s*3\b/i,                   // Dell Pro 3 Notebook ($2,279–$3,059, value — user confirmed)
-      /\bpro1[3-9]\s+e\b/i,                    // Dell Pro14 E / Pro13 E / Pro16 E Notebook (real HW form of Pro Essential, ~$1,299–$2,179)
-      /\bdell\s+pro\s+ess\b/i,                 // Dell Pro ESS Desktop (abbreviated form: "DELL PRO ESS DESKTOP, SLIM (SFF)…")
-      /\bdell\s+pro1[3-9]\s+notebook\b/i,      // Dell Pro14/13/16 Notebook (base standard, cheapest line ~$1,949 — NO tier suffix)
-      /\bdell\s+pro\s+essential\b/i,           // Dell Pro Essential (warranty descriptions + any future full-name hardware)
+      /\bpro\s*base\b/i,                       // Dell Pro Base (legacy label)
+      /\bdell\s+pro\s*3\b/i,                   // Dell Pro 3 (2026 value numbered series — replaces Pro Base / Latitude 3xxx)
+      /\bpro1[3-9]\s+e\b/i,                    // Dell Pro14 E / Pro13 E (legacy value label; real HW form)
+      /\bdell\s+pro\s+ess\b/i,                 // Dell Pro ESS Desktop (legacy abbreviated label)
+      /\bdell\s+pro1[3-9]\s+notebook\b/i,      // Dell Pro14/13/16 Notebook (base standard, no tier suffix)
+      /\bdell\s+pro\s+essential\b/i,           // Dell Pro Essential (legacy label)
       /latitude\s+3\d{3}/i,                    // Dell Latitude 3xxx (legacy)
     ],
   },
@@ -599,13 +611,15 @@ Omit candidates that are not comparable. Similarity values: \
 CPU tier rule: a different CPU tier (i5 vs i7, U5 vs U7) or a generation gap of 2 or more makes a candidate at most "partial", never "close". \
 Condition rule: if a candidate description indicates a non-new condition (OPEN BOX, EX-DEMO, REFURB, REFURBISHED, CARTON DAMAGE, DEMO, USED, etc.) \
 assign it "related" with the condition stated in the reason, or omit it entirely — never assign "close" or "partial" to a non-new item.
-Product-line tier rule: Consider product-line positioning, not just specs. Vendor commercial tiers roughly align as:
- FLAGSHIP: Dell Pro Premium/Pro Max (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/EliteBook X/Dragonfly, ASUS ExpertBook B9
- MAINSTREAM COMMERCIAL: Dell Pro 5/Pro 7/Pro Plus/Pro Desktop-standard (ex-Latitude 5000/7000), Lenovo ThinkPad T/X13, HP EliteBook 6-series/8-series/ZBook, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
- VALUE COMMERCIAL: Dell Pro 3/Pro14 base/Pro Essential/Pro E (ex-Latitude 3000), Lenovo ThinkPad E/L, Lenovo ThinkBook, HP ProBook, ASUS ExpertBook B1, Acer TravelMate P2/B series
+Product-line tier rule: Consider product-line positioning, not just specs. Price alone is NOT a reliable tier signal — a high-config Pro 7 can exceed a low-config Premium. Use the product-line name. Vendor commercial tiers (2026, web-verified):
+ FLAGSHIP: Dell Pro Premium / Pro Max / Pro Precision 5/7 (ex-Latitude 9000), Lenovo ThinkPad X1/X9, HP EliteBook Ultra/EliteBook X/Dragonfly, ASUS ExpertBook B9
+ MAINSTREAM COMMERCIAL: Dell Pro 5 / Pro 7 / Pro Plus / Pro Desktop-standard (ex-Latitude 5000/7000), Lenovo ThinkPad T-series/X13, HP EliteBook 6/8-series/ZBook, ASUS ExpertBook B5, Acer TravelMate P4/P6, Microsoft Surface Laptop/Pro for Business
+ VALUE COMMERCIAL: Dell Pro 3 / Pro14 base / Pro Essential / Pro E / Pro ESS (ex-Latitude 3000), Lenovo ThinkPad E/L, Lenovo ThinkBook, HP ProBook, ASUS ExpertBook B1, Acer TravelMate P2/B series
  CONSUMER: Dell Inspiron/XPS-consumer, Lenovo IdeaPad/Yoga, HP Pavilion/Envy, ASUS Vivobook/Zenbook, Acer Aspire/Swift/Nitro, MSI consumer lines
-Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related. Dell naming: Pro Essential/E/Pro14-base/Pro 3 = value, Pro 5/Pro 7/Pro Plus/Pro Desktop-standard = mainstream, Pro Premium/Pro Max = flagship.
-Lenovo ThinkPad T-series/X13, HP EliteBook 6/8, and Dell Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
+Dell 2026 ladder: 3=value, 5=mainstream, 7=upper-mainstream (revival of Latitude 7000 — same mainstream tier as Pro 5, T14s, X13, EliteBook 8), Premium=flagship, Max/Max Premium/Pro Precision=flagship. Legacy: Pro Plus=mainstream, Pro Base/E/ESS=value.
+Same tier + aligned specs = close. One tier apart = partial. Two+ tiers apart = related.
+Dell Pro 7 competes directly with ThinkPad T14s/X13 and HP EliteBook 8 — all are MAINSTREAM COMMERCIAL. Rate them close when specs align; do not treat Pro 7 as above or below those peers.
+Lenovo ThinkPad T-series/X13, HP EliteBook 6/8, Dell Pro 5/Pro 7/Pro Plus all occupy the SAME mainstream commercial tier — same tier + aligned specs = close, do not treat any of them as above or below the others.
 ThinkPad T14 and T14S are the same product family at the same mainstream tier — never rate T14S lower than T14 or below mainstream commercial.
 FLAGSHIP products (X1 Carbon, X9, EliteBook Ultra, Dragonfly, Dell Pro Premium) against a MAINSTREAM source must be rated "partial" as a premium alternative — never "close", regardless of how well the specs align.
 A CONSUMER candidate against a COMMERCIAL source is at most "related". State the tier difference in the reason.

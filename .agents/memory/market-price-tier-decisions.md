@@ -19,9 +19,22 @@ description: Confirmed product-family tier placements for the SYSTEM_PROMPT and 
 
 **How to apply:** The `MARKET_PRICE_PROMPT=strict` env var switches to the strict rulebook without code change. Do not re-enable `skipTierGuard` in the route — it was a temporary A/B flag.
 
-## Dell Pro 7 = MAINSTREAM (corrected from earlier wrong assumption)
+## Dell 2026 commercial ladder (web-verified, Jay confirmed)
 
-`/\bdell\s+pro\s*7\b/i` in the mainstream block. "DELL PRO 7 NOTEBOOK, 13/14\" FHD+IR, U5-335/U7-365, W11P(CP+) 3Y PRO" is $2,999+ — priced above Pro 5 mainstream ($2,369). Earlier assumption of "value" was wrong. Pattern requires "DELL" immediately before "PRO 7" so keyboards (DELL KB526 PRO 5) and old desktops (DELL PRO 7500) do not misfire.
+Numbers replaced Base/Plus/Premium labels. Use product-line NAME not price — high-config Pro 7 can exceed low-config Premium.
+
+| Line | Tier | Notes |
+|---|---|---|
+| Pro 3 | value | replaces Pro Base / Latitude 3xxx |
+| Pro 5 | mainstream | replaces Pro Plus / Latitude 5xxx |
+| Pro 7 | mainstream | upper-mainstream; competes with T14s/X13/EliteBook 8; revival of Latitude 7000 |
+| Pro Premium | flagship | unchanged |
+| Pro Max / Pro Max Premium | flagship | mobile workstation |
+| Pro Precision 5/7 | flagship | coming soon — replaces Pro Max |
+| Pro Plus (legacy) | mainstream | |
+| Pro Base / Pro E / Pro ESS (legacy) | value | |
+
+FAMILY_TIER_MAP patterns: `/\bdell\s+pro\s*3\b/i` (value), `/\bdell\s+pro\s*5\b/i` (mainstream), `/\bdell\s+pro\s*7\b/i` (mainstream — requires DELL before PRO 7 so "DELL PRO 7500" misfire is blocked by word boundary on 7), `/\bpro\s+precision\s*[57]\b/i` (flagship).
 
 ## Distributor descriptions omit brand prefixes — always query real DB descriptions for new tests
 
@@ -32,7 +45,11 @@ Confirmed pattern: some distributors store "LENOVO X1 CARBON G13 AURA U7-268V VP
 After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Essential:
 - LENOVO 25.4% matched (368/1450 HW rows) — remaining unmatched are AIO desktops (M90A), ThinkCentre, ThinkPad P-series (workstation), and warranty descriptions that passed the HW filter via "MAINSTREAM"/"NOTEBOOK" tokens.
 - HP 3.6% matched (138/3814) — misleadingly low: HP care packs include the word "NOTEBOOK" so they pass the HW filter; actual commercial notebook lines (EliteBook, ProBook, ZBook) ARE covered by patterns. Residual are service/FRU items that can't be candidates in the pipeline.
-- DELL 59.6% matched (189/317 client HW rows) — up from 24.6%. Remaining 40% unmatched are server SSDs/CPUs/memory/GPUs that pass the GB-token HW filter but can never be candidates in a client-hardware comparison. All actual Dell Pro commercial notebooks and desktops are now matched. Dell Pro 3/5/7/Essential hardware uses CTO/BTO/BTP VPN prefixes with sku_type=StockedItem — they ARE candidates.
+- DELL 59.6% matched (189/317 client HW rows) — up from 24.6%. Remaining 40% unmatched are server SSDs/CPUs/memory/GPUs that pass the GB-token HW filter but can never be candidates in a client-hardware comparison. All actual Dell Pro commercial notebooks and desktops are now matched.
+
+## HP EliteBook 6xx/8xx pattern fix
+
+Old patterns `/elitebook\s+6\b/i` and `/elitebook\s+8\b/i` only matched bare "6" / "8" at word boundary — BUT real stored descriptions are "ELITEBOOK 640 G11", "ELITEBOOK 860 G11" (three-digit model numbers), where the digit is NOT at a word boundary. Fixed to `/elitebook\s+6\d{2}\b/i` and `/elitebook\s+8\d{2}\b/i`. This also affects Pro 7 tier-guard: EliteBook 6xx/8xx are now correctly mainstream peers.
 - MICROSOFT 90.6% (347/383) — Surface Laptop/Pro well covered; 36 unmatched are FRU repair parts.
 - ASUS 1.2% — only NUC mini PCs and gaming motherboards; no commercial ExpertBook laptops in catalogue.
 
