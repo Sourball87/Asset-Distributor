@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { seedIfEmpty } from "./lib/seed";
 import { migrateVpnNormalization } from "./lib/migrate-vpn-normalization";
 import { migrateSuperseededBackfill } from "./lib/migrate-superseded-backfill";
+import { db, marketPriceCacheTable } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -36,6 +37,19 @@ try {
   await migrateSuperseededBackfill();
 } catch (err) {
   logger.error({ err }, "Superseded backfill migration failed — server starting anyway");
+}
+
+// One-shot cache purge: set CLEAR_MARKET_PRICE_CACHE_ON_START=1 in production
+// env vars before a deploy to flush stale LLM results after pattern/prompt fixes.
+// Idempotent — safe to leave set; subsequent startups just delete 0 rows.
+if (process.env["CLEAR_MARKET_PRICE_CACHE_ON_START"] === "1") {
+  try {
+    const deleted = await db.delete(marketPriceCacheTable);
+    logger.info({ deletedRows: (deleted as unknown as { rowCount?: number }).rowCount ?? "?" },
+      "CLEAR_MARKET_PRICE_CACHE_ON_START: flushed market-price cache");
+  } catch (err) {
+    logger.error({ err }, "CLEAR_MARKET_PRICE_CACHE_ON_START: cache flush failed — starting anyway");
+  }
 }
 
 app.listen(port, (err) => {

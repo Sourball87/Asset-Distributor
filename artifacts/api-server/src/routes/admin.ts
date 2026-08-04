@@ -1,8 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, usersTable, pool } from "@workspace/db";
-import { eq, ne, and, count } from "drizzle-orm";
+import { db, usersTable, pool, marketPriceCacheTable } from "@workspace/db";
+import { eq, ne, and, count, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import {
   UpdateAdminUserBody,
@@ -305,6 +305,22 @@ router.post("/admin/maintenance/purge-upload", async (req, res): Promise<void> =
   } finally {
     client.release();
   }
+});
+
+// ── DELETE /admin/market-price-cache ─────────────────────────────────────────
+// Clears all LLM competition-check cache entries, forcing fresh results on
+// the next request for every product. Use after deploying pattern/prompt fixes.
+
+router.delete("/admin/market-price-cache", async (req, res): Promise<void> => {
+  const countBefore = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(marketPriceCacheTable);
+  const n = countBefore[0]?.n ?? 0;
+
+  await db.delete(marketPriceCacheTable);
+
+  req.log.info({ deletedRows: n }, "Admin cleared market-price cache");
+  res.json({ deleted: n, message: `Cleared ${n} cached competition-check entries` });
 });
 
 export default router;
