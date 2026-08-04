@@ -750,6 +750,17 @@ describe("detectProductTier", () => {
     // Fixed to /elitebook\s+8\d{2}\b/i.
     expect(detectProductTier("HP ELITEBOOK 860 G11 I7-1355U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
   });
+  it("detects HP EliteBook 8 G1I (2024+ simplified naming) as mainstream — real DB description [BQ4T3PT]", () => {
+    // HP dropped the 3-digit suffix for the 2024 EliteBook 8 generation ("8 G1I" instead of "840"/"860").
+    // /elitebook\s+8\d{2}\b/ does NOT match "8 G1I" (no digit after 8). Added /elitebook\s+8\b/i.
+    // Verified safe: "ELITEBOOK 840" has 8→4 (word-char boundary absent) so /8\b/ doesn't fire on 840.
+    expect(detectProductTier("ELITEBOOK 8 G1I 16N AI U5-226V 16GB 512GB WL BT W11P NG STD TS IR L-LIFE BATT 5G 3YR")).toBe("mainstream");
+  });
+  it("does not misfire EliteBook 8 G1I pattern on EliteBook 840 — \b guards old 3-digit naming", () => {
+    // /elitebook\s+8\b/i must NOT match "ELITEBOOK 840": after '8' comes '4' (word-char), so \b is absent.
+    // Both patterns match independently — 840 hits /8\d{2}\b/, not /8\b/. Either way → mainstream.
+    expect(detectProductTier("HP ELITEBOOK 840 G11 I5-1335U 16GB 512GB W11P 3Y NBD")).toBe("mainstream");
+  });
   it("does not misfire EliteBook 6xx pattern on EliteBook X (X caught by flagship first)", () => {
     // EliteBook X must remain flagship — order-dependent guard: flagship block runs before mainstream.
     expect(detectProductTier("HP ELITEBOOK X 14 G11 I7-1355U 32GB 1TB W11P 3Y")).toBe("flagship");

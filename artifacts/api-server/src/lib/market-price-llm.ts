@@ -377,6 +377,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /\blenovo\s+x13\b/i,             // X13 bare form ("LENOVO X13 G6/G7…") — distributor omits THINKPAD prefix (20+ rows confirmed)
       /elitebook\s+6\d{2}\b/i,          // HP EliteBook 6xx series (640, 650, 660, 680…) — real form: "ELITEBOOK 640 G11"
       /elitebook\s+8\d{2}\b/i,          // HP EliteBook 8xx series (840, 850, 860…) — real form: "ELITEBOOK 860 G11"
+      /elitebook\s+8\b/i,               // HP EliteBook 8 G1i/G2i (2024+ simplified naming) — real form: "ELITEBOOK 8 G1I 16N AI…"
       /\bpro\s*(?:plus|1[3-9]\s*plus)\b/i, // Dell Pro Plus / Pro13 Plus / Pro14 Plus / Pro16 Plus (legacy label = mainstream)
       /\bdell\s+pro\s*5\b/i,           // Dell Pro 5 (2026 mainstream numbered series — replaces Pro Plus)
       /\bdell\s+pro\s*7\b/i,           // Dell Pro 7 (2026 upper-mainstream — revival of Latitude 7000; same tier as T14s/X13/EliteBook 8)

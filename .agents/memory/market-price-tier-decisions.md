@@ -47,6 +47,14 @@ After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Ess
 - HP 3.6% matched (138/3814) — misleadingly low: HP care packs include the word "NOTEBOOK" so they pass the HW filter; actual commercial notebook lines (EliteBook, ProBook, ZBook) ARE covered by patterns. Residual are service/FRU items that can't be candidates in the pipeline.
 - DELL 59.6% matched (189/317 client HW rows) — up from 24.6%. Remaining 40% unmatched are server SSDs/CPUs/memory/GPUs that pass the GB-token HW filter but can never be candidates in a client-hardware comparison. All actual Dell Pro commercial notebooks and desktops are now matched.
 
+## HP EliteBook 8 G1i — 2024+ simplified naming (no 3-digit suffix)
+
+HP dropped the 3-digit number for the 2024 EliteBook 8 generation. Real DB description: `ELITEBOOK 8 G1I 16N AI U5-226V 16GB 512GB WL BT W11P...`. Pattern `/elitebook\s+8\d{2}\b/i` (8→three digits) does NOT match this because "8 G" has a space before G, not a digit. Pattern `/elitebook\s+8\b/i` safely handles the new form (word-boundary `\b` fires after "8" when followed by a space) without matching "ELITEBOOK 840" (8 followed by "4" → no boundary). Both patterns are now in the mainstream block of FAMILY_TIER_MAP.
+
+**Why the original BQ4T3PT demotion happened:** `detectProductTier` returned null for ELITEBOOK 8 G1I. The guard's `tierDiffers` check requires both sides non-null so the guard didn't demote — the LLM itself judged it "partial". SYSTEM_PROMPT should be updated to name EliteBook 8 G1i as mainstream so the LLM also handles it correctly.
+
+**How to apply:** New HP "GNI" generation naming (e.g. "ELITEBOOK 8 G1I", future "ELITEBOOK 8 G2I") — verify `/elitebook\s+8\b/i` covers it. When adding other HP product families, test against real stored descriptions from the DB.
+
 ## FAMILY_TIER_MAP pattern audit findings (run against 20K real descriptions)
 
 **Rule: never test patterns against idealised strings — always use real stored descriptions.**
@@ -54,7 +62,7 @@ After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Ess
 | Pattern | Bug | Fix |
 |---|---|---|
 | `/elitebook\s+6\b/i` | `\b` not satisfied in "ELITEBOOK 640" (6 followed by 4) | → `/elitebook\s+6\d{2}\b/i` |
-| `/elitebook\s+8\b/i` | `\b` not satisfied in "ELITEBOOK 860" (8 followed by 6) | → `/elitebook\s+8\d{2}\b/i` |
+| `/elitebook\s+8\b/i` | `\b` not satisfied in "ELITEBOOK 860" (8 followed by 6) | → `/elitebook\s+8\d{2}\b/i` + `/elitebook\s+8\b/i` (new naming) |
 | `/expertbook\s+b5/i` (mainstream) | B-numbers in VPN prefix, NOT in description text; never matches | → `/\basus\s+expertbook\b/i` mainstream |
 | `/expertbook\s+b1/i` (value) | Same — never matches | Removed; all ExpertBook → mainstream |
 | `/thinkpad\s+x13\b/i` | Misses 20+ bare-form "LENOVO X13 G6/G7" rows | Added `/\blenovo\s+x13\b/i` alongside |
