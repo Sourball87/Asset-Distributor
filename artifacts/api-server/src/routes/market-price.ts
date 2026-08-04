@@ -393,12 +393,9 @@ async function runPipeline(opts: {
       };
     });
 
-  // Deterministic guard: demote "close" → "partial" when CPU tier or form
-  // factor differ. In "simple" mode, skip the product-family tier check so
-  // the model's unaided tier judgment is visible.
-  const guarded = applyDeterministicGuard(opts.sourceDescription, rawMatches, {
-    skipTierGuard: mode === "simple",
-  });
+  // Deterministic guard: demote "close" → "partial" when CPU tier, form
+  // factor, or product-family tier differ. All checks always active.
+  const guarded = applyDeterministicGuard(opts.sourceDescription, rawMatches);
 
   // Per-brand cap: keep at most 4 matches per brand in the final results.
   const matches = applyPerBrandCap(guarded, 4);

@@ -569,6 +569,13 @@ describe("detectProductTier", () => {
   it("detects HP ProBook as value", () => {
     expect(detectProductTier("HP PROBOOK 440 G11 14 WUXGA U5-125U 16GB 512GB W11P")).toBe("value");
   });
+  it("detects Dell Pro 7 as value commercial", () => {
+    expect(detectProductTier("DELL PRO 7 NOTEBOOK, 14\" FHD+IR, U5-335, 16GB, 512GB, WL, W11P(CP+), 3Y PRO")).toBe("value");
+  });
+  it("does not misfire Pro 7 pattern on Pro 7500 (digit not at word boundary)", () => {
+    // "PRO 7500" should not match /\bpro\s*7\b/
+    expect(detectProductTier("DELL PRO DESKTOP 7500 I7-10700 16GB W11P")).not.toBe("value");
+  });
 
   // CONSUMER
   it("detects IdeaPad as consumer", () => {

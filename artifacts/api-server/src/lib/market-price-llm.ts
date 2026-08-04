@@ -279,6 +279,7 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
       /travelmate\s+p2/i,
       /travelmate\s+b\d/i,
       /\bpro\s*base\b/i,        // Dell Pro Base (new naming)
+      /\bpro\s*7\b/i,           // Dell Pro 7 (base commercial notebook line)
       /latitude\s+3\d{3}/i,     // Dell Latitude 3xxx (legacy)
     ],
   },
@@ -599,15 +600,15 @@ Return at most 12 matches. Each reason must be 15 words or fewer. Respond with r
 
 /**
  * SIMPLE prompt — intent + latitude, minimal rulebook.
- * Hypothesis: fewer prescriptive rules → more varied, accurate brand spread.
+ * Code-side guards handle tier demotion; prompt provides judgment latitude.
  */
 export const SYSTEM_PROMPT_SIMPLE = `You are a product analyst for an IT distributor. \
 You will be given a source product and a numbered list of candidate products from other brands, \
 each with brand, part number, and description.
 
 Identify which candidates are genuine market alternatives a product manager should consider \
-when deciding what to stock. Use your knowledge of specifications, product-line positioning \
-(e.g. flagship vs mainstream vs value commercial vs consumer lines), and price positioning. \
+when deciding what to stock. Use your knowledge of specifications, product-line positioning, \
+and price positioning. \
 Where several brands have genuinely comparable options, include a spread of brands rather than \
 many variants from one.
 
@@ -616,8 +617,8 @@ specific to that candidate — name its actual product line and say what makes i
 different. Do not reuse the same reason across candidates.
 
 Similarity values: \
-"close" = near-identical function, spec class, and product-line tier; \
-"partial" = same function but different tier, capacity, or spec class; \
+"close" = near-identical function and spec class; \
+"partial" = same function but different spec class or capacity; \
 "related" = same broad category but meaningfully different use case or form factor.
 
 Select ONLY from the numbered candidates — never invent products. \
