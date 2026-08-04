@@ -258,32 +258,38 @@ export const FAMILY_TIER_MAP: Array<{ patterns: RegExp[]; tier: ProductTier }> =
   {
     tier: "mainstream",
     patterns: [
-      /thinkpad\s+t\d/i,        // T14, T14S, T15, T16, T13 …
-      /thinkpad\s+x13\b/i,      // X13 (not X1, not X9)
-      /elitebook\s+6\b/i,       // HP EliteBook 6 series
-      /elitebook\s+8\b/i,       // HP EliteBook 8 series
+      /thinkpad\s+t\d/i,               // T14, T14S, T15, T16, T13 … (THINKPAD-prefixed form)
+      /\blenovo\s+t1[3-9]s?\b/i,       // "LENOVO T14 G7…", "LENOVO T14S G6…", "LENOVO T16 G4…" — distributor omits THINKPAD
+      /thinkpad\s+x13\b/i,             // X13 (not X1, not X9)
+      /elitebook\s+6\b/i,              // HP EliteBook 6 series
+      /elitebook\s+8\b/i,              // HP EliteBook 8 series
       /\bpro\s*(?:plus|1[46]\s*plus|16\s*plus)\b/i, // Dell Pro Plus / Pro14 Plus / Pro16 Plus
-      /latitude\s+[57]\d{3}/i,  // Dell Latitude 5xxx / 7xxx (legacy)
+      /\bdell\s+pro\s*5\b/i,           // Dell Pro 5 (mainstream commercial — notebooks & desktops)
+      /latitude\s+[57]\d{3}/i,         // Dell Latitude 5xxx / 7xxx (legacy)
       /expertbook\s+b5/i,
       /travelmate\s+p[46]/i,
       /surface\s+laptop/i,
       /surface\s+pro\b/i,
+      /\bzbook\b/i,                    // HP ZBook Firefly/Power/Studio (mobile workstation, mainstream tier)
     ],
   },
   // ── VALUE COMMERCIAL ────────────────────────────────────────────────────
   {
     tier: "value",
     patterns: [
-      /thinkpad\s+e\d/i,        // ThinkPad E series
-      /thinkpad\s+l\d/i,        // ThinkPad L series
-      /thinkbook/i,             // Lenovo ThinkBook (not ThinkPad)
-      /probook/i,               // HP ProBook
+      /thinkpad\s+e\d/i,               // ThinkPad E series (THINKPAD-prefixed form)
+      /thinkpad\s+l\d/i,               // ThinkPad L series (THINKPAD-prefixed form)
+      /\blenovo\s+l1[4-9]\b/i,         // "LENOVO L14 G6…", "LENOVO L16 G2…" — distributor omits THINKPAD
+      /thinkbook/i,                    // Lenovo ThinkBook (not ThinkPad)
+      /probook/i,                      // HP ProBook
       /expertbook\s+b1/i,
       /travelmate\s+p2/i,
       /travelmate\s+b\d/i,
-      /\bpro\s*base\b/i,        // Dell Pro Base (new naming)
-      /\bpro\s*7\b/i,           // Dell Pro 7 (base commercial notebook line)
-      /latitude\s+3\d{3}/i,     // Dell Latitude 3xxx (legacy)
+      /\bpro\s*base\b/i,               // Dell Pro Base (new naming)
+      /\bpro\s*7\b/i,                  // Dell Pro 7 (base commercial notebook line)
+      /\bdell\s+pro\s*3\b/i,           // Dell Pro 3 (entry commercial — notebooks & desktops)
+      /\bdell\s+pro\s+essential\b/i,   // Dell Pro Essential (entry commercial line)
+      /latitude\s+3\d{3}/i,           // Dell Latitude 3xxx (legacy)
     ],
   },
   // ── CONSUMER ────────────────────────────────────────────────────────────

@@ -542,6 +542,57 @@ describe("detectProductTier", () => {
     // Stored as: "BOX DAMAGE Lenovo ThinkBook 14 2-in-1 G5 U5-225U, 16GB, 512GB, 14\" WUXGA TOUCH, W11P, 1Y OS"
     expect(detectProductTier('BOX DAMAGE Lenovo ThinkBook 14 2-in-1 G5 U5-225U, 16GB, 512GB, 14" WUXGA TOUCH, W11P, 1Y OS')).toBe("value");
   });
+  it("detects T14 G7 as mainstream — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO T14 G7 AMD R5-230, 14\" WUXGA, 512GB, 16GB, W11P, 3YR PREM"
+    expect(detectProductTier('LENOVO T14 G7 AMD R5-230, 14" WUXGA, 512GB, 16GB, W11P, 3YR PREM')).toBe("mainstream");
+  });
+  it("detects T14S G6 as mainstream — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO T14S G6 X ELITE (X1E-78)14\" WUXGA TOUCH, 512GB32GB, W11P, 3YR PREM"
+    expect(detectProductTier('LENOVO T14S G6 X ELITE (X1E-78)14" WUXGA TOUCH, 512GB32GB, W11P, 3YR PREM')).toBe("mainstream");
+  });
+  it("detects T16 G4 as mainstream — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO T16 G4 U5-225H, 16\" WUXGA, 512GB, 16GB, W11P(AI), 3YR PREM"
+    expect(detectProductTier('LENOVO T16 G4 U5-225H, 16" WUXGA, 512GB, 16GB, W11P(AI), 3YR PREM')).toBe("mainstream");
+  });
+  it("detects T14S 2-in-1 G1 as mainstream — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO T14S 2IN1 G1 U7-255H, 14\" WUXGA TOUCH, 512GB, 32GB, W11P(AI), 3YR PREM"
+    expect(detectProductTier('LENOVO T14S 2IN1 G1 U7-255H, 14" WUXGA TOUCH, 512GB, 32GB, W11P(AI), 3YR PREM')).toBe("mainstream");
+  });
+  it("detects L14 G6 as value — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO L14 G6 AMD R5-215, 14\" WUXGA, 512GB, 16GB, W11P, 3YOS"
+    expect(detectProductTier('LENOVO L14 G6 AMD R5-215, 14" WUXGA, 512GB, 16GB, W11P, 3YOS')).toBe("value");
+  });
+  it("detects L16 G2 as value — real DB description, no THINKPAD prefix", () => {
+    // Stored as: "LENOVO L16 G2 U5-225U, 16\" WUXGA, 512GB, 32GB, W11P (AI), 3YOS"
+    expect(detectProductTier('LENOVO L16 G2 U5-225U, 16" WUXGA, 512GB, 32GB, W11P (AI), 3YOS')).toBe("value");
+  });
+  it("detects DEMO L16 G2 as value — real DB description with DEMO prefix", () => {
+    // Stored as: "DEMO LENOVO L16 G2 U5-225U, 16\" WUXGA, 512GB, 32GB, W11P (AI), 3YOS (OPENED BOX)"
+    expect(detectProductTier('DEMO LENOVO L16 G2 U5-225U, 16" WUXGA, 512GB, 32GB, W11P (AI), 3YOS (OPENED BOX)')).toBe("value");
+  });
+  it("detects HP ZBook Firefly G11 as mainstream — real DB description", () => {
+    // Stored as: "HP ZBook FireFly G11 14' WUXGA TOUCH Intel AI U7-155H 16GB DDR5 512GB SSD WIN 11 PRO..."
+    expect(detectProductTier("HP ZBook FireFly G11 14' WUXGA TOUCH Intel AI U7-155H 16GB DDR5 512GB SSD WIN 11 PRO Arc GPU")).toBe("mainstream");
+  });
+  it("detects HP ZBook 8 G1i FireFly as mainstream — real DB description", () => {
+    // Stored as: "HP ZBook 8 G1i FireFly 16' WUXGA Touch IR Intel U5-225H 16GB DDR5 512GB SSD WIN 11 PRO..."
+    expect(detectProductTier("HP ZBook 8 G1i FireFly 16' WUXGA Touch IR Intel U5-225H 16GB DDR5 512GB SSD WIN 11 PRO")).toBe("mainstream");
+  });
+  it("detects Dell Pro 5 desktop as mainstream — real DB description form", () => {
+    // Stored as bundle: "BUNDLE DELL PRO 5 DESKTOP, MICRO (MFF), U5-335 &..."
+    // Standalone hardware would be: "DELL PRO 5 DESKTOP, MICRO (MFF), U5-335, 16GB, 512GB, W11P, 3Y PRO"
+    expect(detectProductTier("DELL PRO 5 DESKTOP, MICRO (MFF), U5-335, 16GB, 512GB, W11P, 3Y PRO")).toBe("mainstream");
+  });
+  it("detects Dell Pro 3 as value — pattern match", () => {
+    expect(detectProductTier("DELL PRO 3 14 NOTEBOOK, 14\" FHD, U3-100, 8GB, 256GB, W11P, 1Y PRO")).toBe("value");
+  });
+  it("detects Dell Pro Essential as value — pattern match", () => {
+    expect(detectProductTier("DELL PRO ESSENTIAL 14 NOTEBOOK, 14\" FHD, U3-100, 8GB, 256GB, W11P, 1Y PRO")).toBe("value");
+  });
+  it("does not misfire Dell Pro 5 pattern on keyboard (DELL KB526 PRO 5)", () => {
+    // /\bdell\s+pro\s*5\b/i requires DELL immediately before PRO — KB526 is between them
+    expect(detectProductTier("DELL KB526 PRO 5 WIRELESS KEYBOARD - BLACK, 3YR")).not.toBe("mainstream");
+  });
   // ── Idealised descriptions (kept for regression coverage) ─────────────────
   it("detects ThinkPad X1 Carbon as flagship — THINKPAD-prefixed form", () => {
     expect(detectProductTier("LENOVO THINKPAD X1 CARBON GEN12 U7-258V 32GB 1TB")).toBe("flagship");
@@ -781,5 +832,116 @@ describe("sortMatchesBySimilarity", () => {
     const result = sortMatchesBySimilarity(input);
     expect(result[0]!.similarity).toBe("close");
     expect(result[1]!.similarity).toBe("unknown");
+  });
+});
+
+// ── applyDeterministicGuard — end-to-end integration (real DB descriptions) ──
+//
+// Guards against the class of bug where the LLM rates a flagship product "close"
+// against a mainstream source (or value vs mainstream) and the code guard silently
+// misses it because the stored description doesn't match the expected pattern.
+// Uses the actual strings returned by the DB so new distributor format changes
+// that break detection are caught before they reach production.
+
+describe("applyDeterministicGuard — end-to-end with real DB descriptions", () => {
+  // Real stored source description — mainstream tier
+  const SOURCE_MAINSTREAM =
+    'DELL PRO14 PLUS NOTEBOOK, 14" FHD+ IR, U7-268V, 32GB, 512GB, WL, W11P(CP+) 3Y PRO';
+
+  const m = (description: string, similarity: "close" | "partial"): import("./market-price-llm").GuardableMatch =>
+    ({ description, similarity, reason: "LLM said close" });
+
+  // ── X1 Carbon — the original gap: stored without THINKPAD prefix ──────────
+  it("demotes X1 Carbon G13 Aura close→partial — real DB description (flagship vs mainstream)", () => {
+    // This exact string caused the production gap before the /\bx1\s+carbon\b/i fix.
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO X1 CARBON G13 AURA U7-268V VPRO, 14" WUXGA TOUCH, 512GB, 32GB, AI, W11P(CP+),3YPREM', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toMatch(/flagship/i);
+    expect(result[0]!.reason).toMatch(/premium alternative/i);
+  });
+
+  // ── EliteBook X — stored without ELITEBOOK prefix in some bundle rows ──────
+  it("demotes EliteBook X Flip G1I close→partial — real DB description (flagship vs mainstream)", () => {
+    // Stored as: "ELITEBOOK X FLIP G1I 14 AI U5-226V 16GB 512GB W11P STD TS PVCY WL BT L-LIFE BATT PEN 3YR 5"
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m("ELITEBOOK X FLIP G1I 14 AI U5-226V 16GB 512GB W11P STD TS PVCY WL BT L-LIFE BATT PEN 3YR 5", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toMatch(/flagship/i);
+  });
+
+  // ── T14 bare form — the NEW pattern: must NOT be demoted (same tier) ────────
+  it("does NOT demote T14 G7 bare form — real DB description (mainstream vs mainstream)", () => {
+    // Stored as: "LENOVO T14 G7 AMD R5-230, 14\" WUXGA, 512GB, 16GB, W11P, 3YR PREM"
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO T14 G7 AMD R5-230, 14" WUXGA, 512GB, 16GB, W11P, 3YR PREM', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  it("does NOT demote T14S G6 bare form — real DB description (mainstream vs mainstream)", () => {
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO T14S G6 X ELITE (X1E-78)14" WUXGA TOUCH, 512GB32GB, W11P, 3YR PREM', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  it("T16 G4 is demoted by form-factor guard (16\" vs 14\" source) — not a tier issue", () => {
+    // T16 G4 is mainstream tier (same as source) so tier guard does NOT fire,
+    // but the form-factor guard DOES fire: source is 14", T16 is 16".
+    // This test documents the correct combined-guard behaviour.
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO T16 G4 U5-225H, 16" WUXGA, 512GB, 16GB, W11P(AI), 3YR PREM', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial"); // form-factor guard fires
+  });
+
+  // ── L14/L16 bare form — value vs mainstream must be demoted ─────────────────
+  it("demotes L14 G6 bare form close→partial — real DB description (value vs mainstream)", () => {
+    // Stored as: "LENOVO L14 G6 AMD R5-215, 14\" WUXGA, 512GB, 16GB, W11P, 3YOS"
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO L14 G6 AMD R5-215, 14" WUXGA, 512GB, 16GB, W11P, 3YOS', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toMatch(/value commercial/i);
+  });
+
+  it("demotes L16 G2 bare form close→partial — real DB description (value vs mainstream)", () => {
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO L16 G2 U5-225U, 16" WUXGA, 512GB, 32GB, W11P (AI), 3YOS', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toMatch(/value commercial/i);
+  });
+
+  // ── ThinkBook bare form (mixed-case real description) ─────────────────────
+  it("demotes ThinkBook 14 2-in-1 close→partial — real DB description incl. BOX DAMAGE prefix", () => {
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('BOX DAMAGE Lenovo ThinkBook 14 2-in-1 G5 U5-225U, 16GB, 512GB, 14" WUXGA TOUCH, W11P, 1Y OS', "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("partial");
+    expect(result[0]!.reason).toMatch(/value commercial/i);
+  });
+
+  // ── ZBook — must be mainstream (not demoted against mainstream source) ──────
+  it("does NOT demote ZBook Firefly G11 — real DB description (mainstream vs mainstream)", () => {
+    const result = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m("HP ZBook FireFly G11 14' WUXGA TOUCH Intel AI U7-155H 16GB DDR5 512GB SSD WIN 11 PRO Arc GPU", "close"),
+    ]);
+    expect(result[0]!.similarity).toBe("close");
+  });
+
+  // ── Mixed batch — verifies guard handles multiple candidates at once ────────
+  it("processes a mixed batch correctly — demotes flagship+value, passes mainstream", () => {
+    const results = applyDeterministicGuard(SOURCE_MAINSTREAM, [
+      m('LENOVO X1 CARBON G13 AURA U7-268V VPRO, 14" WUXGA TOUCH, 512GB, 32GB, AI, W11P(CP+),3YPREM', "close"), // flagship → partial
+      m('LENOVO T14 G7 AMD R5-230, 14" WUXGA, 512GB, 16GB, W11P, 3YR PREM', "close"),                          // mainstream → close
+      m('LENOVO L14 G6 AMD R5-215, 14" WUXGA, 512GB, 16GB, W11P, 3YOS', "close"),                              // value → partial
+    ]);
+    expect(results[0]!.similarity).toBe("partial"); // X1 Carbon demoted
+    expect(results[1]!.similarity).toBe("close");   // T14 unchanged
+    expect(results[2]!.similarity).toBe("partial"); // L14 demoted
   });
 });

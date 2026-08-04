@@ -27,9 +27,16 @@ description: Confirmed product-family tier placements for the SYSTEM_PROMPT and 
 
 Confirmed pattern: some distributors store "LENOVO X1 CARBON G13 AURA U7-268V VPRO…" without the "THINKPAD" prefix. The existing `/thinkpad\s+x1\b/i` pattern couldn't match it. Fix: added `/\bx1\s+carbon\b/i`, `/\bx1\s+yoga\b/i`, `/\bx9\s+aura\b/i` as peer patterns to cover the bare form. ThinkPad T-series (T14/T14S stored as "LENOVO T14 G6…") has the same gap — tracked as task #35. **Rule:** before writing tier-map tests, always query the DB for the real stored description string and test against that; idealised descriptions (with proper brand prefix) are kept but labelled separately.
 
-## Coverage diagnostic findings (run Aug 2026)
+## Coverage diagnostic findings — client-hardware-only (Aug 2026)
 
-Full catalogue has ~45k products across tracked brands. Most unmatched by tier map are non-hardware (software licences, warranties, accessories, bundles) — expected. Actionable hardware gaps: ThinkPad T-series bare form (task #35), HP Firefly/ZBook (task #35), Dell Pro 3 / Pro 5 / Pro Essential (tier confirmation from Jay needed before adding patterns).
+After adding bare-form patterns (T-series, L-series, ZBook) and Dell Pro 3/5/Essential:
+- LENOVO 25.4% matched (368/1450 HW rows) — remaining unmatched are AIO desktops (M90A), ThinkCentre, ThinkPad P-series (workstation), and warranty descriptions that passed the HW filter via "MAINSTREAM"/"NOTEBOOK" tokens.
+- HP 3.6% matched (138/3814) — misleadingly low: HP care packs include the word "NOTEBOOK" so they pass the HW filter; actual commercial notebook lines (EliteBook, ProBook, ZBook) ARE covered by patterns. Residual are service/FRU items that can't be candidates in the pipeline.
+- DELL 24.6% matched (76/309) — unmatched are AIO desktops (Pro 24 AIO Plus), Precision workstations, bundles. Dell Pro 3/5/Essential hardware not yet stocked as standalone VPNs (only warranty/bundle items in DB), but patterns are in place for when they arrive.
+- MICROSOFT 90.6% (347/383) — Surface Laptop/Pro well covered; 36 unmatched are FRU repair parts.
+- ASUS 1.2% — only NUC mini PCs and gaming motherboards; no commercial ExpertBook laptops in catalogue.
+
+Real actionable hardware gaps for future work: Lenovo ThinkPad P-series (workstation, mainstream/flagship), Lenovo M90A AIO (ThinkCentre AIO, mainstream), Dell Pro 24 AIO Plus (mainstream).
 
 ## SYSTEM_PROMPT and FAMILY_TIER_MAP must stay in sync
 
